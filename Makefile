@@ -1,4 +1,4 @@
-.PHONY: help setup status test explore transform
+.PHONY: help setup status test explore transform build
 SHELL := /bin/bash
 
 help:
@@ -9,8 +9,11 @@ help:
 	@echo "  status     Check system dependencies"
 	@echo "  test       Run test suite"
 	@echo "  transform  Load a ShinyExport JSON snapshot into data/products.db (JSON_PATH=path/to.json SNAPSHOT_DATE=YYYYMMDD)"
-	@echo "  explore    Open the transformed SQLite file in Datasette (DB_PATH=path/to.db)"
+	@echo "  build      Materialize data/products_public.db, redacted per sensitive_fields.json (ADR-04)"
+	@echo "  explore    Open the transformed SQLite file in Datasette (default data/products.db, override with DB_PATH=path/to.db)"
 	@echo ""
+
+DB_PATH ?= data/products.db
 
 setup:
 	@source ./make.sh && setup_commands
@@ -23,6 +26,9 @@ test:
 
 transform:
 	pipenv run python -m app.transform $(JSON_PATH) $(SNAPSHOT_DATE)
+
+build:
+	pipenv run python -m app.build
 
 explore:
 	pipenv run datasette $(DB_PATH)

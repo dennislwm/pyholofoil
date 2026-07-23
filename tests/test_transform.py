@@ -1,7 +1,7 @@
 import json
 import sqlite3
 
-from app.transform import load_products
+from app.transform import load_products, main
 
 
 def test_load_products_creates_one_flat_table(tmp_path):
@@ -70,3 +70,19 @@ def test_load_products_keeps_different_snapshots_separate(tmp_path):
     conn.close()
 
     assert dates == ["20260528", "20260708"]
+
+
+def test_main_writes_to_conventional_default_db_path(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    json_path = tmp_path / "shiny.json"
+    json_path.write_text(json.dumps([
+        {"product_name": "151 Booster Box Case", "set_name": "Pokémon Card 151"},
+    ]))
+
+    main([str(json_path), "20260528"])
+
+    conn = sqlite3.connect(str(tmp_path / "data" / "products.db"))
+    count = conn.execute("SELECT COUNT(*) FROM products").fetchone()[0]
+    conn.close()
+
+    assert count == 1

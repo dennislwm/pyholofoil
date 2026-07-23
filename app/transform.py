@@ -1,4 +1,6 @@
+import argparse
 import json
+import os
 import sqlite3
 
 
@@ -34,3 +36,17 @@ def load_products(json_path, db_path, snapshot_date):
     )
     conn.commit()
     conn.close()
+
+
+def main(argv=None):
+    parser = argparse.ArgumentParser()
+    parser.add_argument("json_path")
+    parser.add_argument("snapshot_date")
+    parser.add_argument("--db-path", default="data/products.db")
+    args = parser.parse_args(argv)
+    os.makedirs(os.path.dirname(args.db_path), exist_ok=True)
+    load_products(args.json_path, args.db_path, args.snapshot_date)
+
+
+if __name__ == "__main__":
+    main()

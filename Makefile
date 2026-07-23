@@ -17,4 +17,4 @@ status:
 	@source ./make.sh && show_status
 
 test:
-	pipenv run pytest tests/
+	pipenv run python -m pytest tests/

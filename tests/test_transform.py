@@ -94,6 +94,22 @@ def test_load_products_sets_last_updated_on_write(tmp_path):
     assert last_updated is not None
 
 
+def test_load_products_accepts_csv(tmp_path):
+    csv_path = tmp_path / "shiny.csv"
+    csv_path.write_text(
+        "id,product_name,set_name\naaa,151 Booster Box Case,Pokémon Card 151\n"
+    )
+    db_path = tmp_path / "pyholofoil.db"
+
+    load_products(str(csv_path), str(db_path))
+
+    conn = sqlite3.connect(str(db_path))
+    rows = conn.execute("SELECT product_name, set_name FROM products").fetchall()
+    conn.close()
+
+    assert rows == [("151 Booster Box Case", "Pokémon Card 151")]
+
+
 def test_main_writes_to_conventional_default_db_path(tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)
     json_path = tmp_path / "shiny.json"

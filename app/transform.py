@@ -5,6 +5,8 @@ import os
 import sqlite3
 from datetime import datetime, timezone
 
+import yaml
+
 
 def _read_records(input_path):
     """Per REQ-008: dispatch on file extension into the same list[dict]
@@ -38,26 +40,58 @@ def _check_schema(conn, expected_columns, db_path):
         )
 
 
+def _load_extra_override_columns(config_path="datasette.yaml"):
+    """Per ADR-10 (Option 4): override-only columns (present in
+    products_overrides but not products) are declared durably in
+    datasette.yaml, not inferred from a live database inspection --
+    surviving a fresh checkout or a schema-recovery rebuild (ADR-08)
+    without relying on the operator's memory."""
+    if not os.path.exists(config_path):
+        return []
+    with open(config_path) as f:
+        config = yaml.safe_load(f) or {}
+    return config.get("x-overrides-extra-columns") or []
+
+
 def _ensure_overrides(conn, columns):
     """Per ADR-09 (Policy C): products_overrides mirrors products' input
     columns (not last_updated, which is transform-internal bookkeeping),
     all nullable except id. transform never writes to this table --
     write-ui's insert/update/delete permissions are scoped to it via
-    datasette.yaml, leaving products read-only through the UI. The
-    products_merged VIEW (COALESCE per column) is what explore browses,
-    so a manual correction here survives every future transform re-run."""
+    datasette.yaml, leaving products read-only through the UI.
+
+    Per ADR-10 (Option 4): products_merged is rebuilt every run (not
+    CREATE VIEW IF NOT EXISTS, which never adapts once created) to also
+    include any config-declared override-only column -- SQLite's ALTER
+    TABLE ADD COLUMN has no IF NOT EXISTS, so each declared column still
+    needs one existence check before being added, same primitive as
+    _check_schema (ADR-08); what changes is WHICH columns get checked, a
+    config-declared list instead of a diff against `columns`."""
     override_cols = [c for c in columns if c != "last_updated"]
     conn.execute(
         "CREATE TABLE IF NOT EXISTS products_overrides "
         f"({', '.join(f'{c} TEXT' for c in override_cols)}, "
         "PRIMARY KEY (id))"
     )
+
+    existing = {row[1] for row in conn.execute("PRAGMA table_info(products_overrides)")}
+    extra_cols = [
+        c for c in _load_extra_override_columns() if c not in override_cols
+    ]
+    for c in extra_cols:
+        if c not in existing:
+            conn.execute(f"ALTER TABLE products_overrides ADD COLUMN {c} TEXT")
+
+    all_override_cols = override_cols + extra_cols
     merge_cols = ", ".join(
-        "p.id" if c == "id" else f"COALESCE(o.{c}, p.{c}) AS {c}"
-        for c in override_cols
+        "p.id" if c == "id"
+        else f"COALESCE(o.{c}, p.{c}) AS {c}" if c in override_cols
+        else f"o.{c}"
+        for c in all_override_cols
     )
+    conn.execute("DROP VIEW IF EXISTS products_merged")
     conn.execute(
-        "CREATE VIEW IF NOT EXISTS products_merged AS "
+        "CREATE VIEW products_merged AS "
         f"SELECT {merge_cols}, p.last_updated FROM products p "
         "LEFT JOIN products_overrides o ON p.id = o.id"
     )

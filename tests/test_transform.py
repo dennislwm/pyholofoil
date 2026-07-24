@@ -263,3 +263,78 @@ def test_products_merged_falls_back_to_products_when_no_override(tmp_path):
     conn.close()
 
     assert row == ("151 Booster Box Case",)
+
+
+def test_config_declared_override_column_appears_in_merged_view(tmp_path, monkeypatch):
+    """Per ADR-10 (Option 4): a column declared in datasette.yaml's
+    x-overrides-extra-columns is added to products_overrides and shows up
+    in products_merged, even though products itself has no such column."""
+    monkeypatch.chdir(tmp_path)
+    (tmp_path / "datasette.yaml").write_text(
+        "x-overrides-extra-columns:\n  - operator_notes\n"
+    )
+    db_path = tmp_path / "products.db"
+    json_path = tmp_path / "shiny.json"
+    json_path.write_text(json.dumps([{"id": "aaa", "product_name": "X"}]))
+
+    load_products(str(json_path), str(db_path))
+
+    conn = sqlite3.connect(str(db_path))
+    conn.execute(
+        "INSERT INTO products_overrides (id, operator_notes) VALUES (?, ?)",
+        ("aaa", "flagged for review"),
+    )
+    conn.commit()
+    row = conn.execute(
+        "SELECT operator_notes FROM products_merged WHERE id = ?", ("aaa",)
+    ).fetchone()
+    conn.close()
+
+    assert row == ("flagged for review",)
+
+
+def test_config_declared_columns_accumulate_across_runs(tmp_path, monkeypatch):
+    """Per ADR-10: products_merged is rebuilt every run, so config-declared
+    columns added incrementally across separate transform runs all end up
+    reflected, not just the first one."""
+    monkeypatch.chdir(tmp_path)
+    db_path = tmp_path / "products.db"
+    json_path = tmp_path / "shiny.json"
+    json_path.write_text(json.dumps([{"id": "aaa", "product_name": "X"}]))
+
+    (tmp_path / "datasette.yaml").write_text(
+        "x-overrides-extra-columns:\n  - field_one\n"
+    )
+    load_products(str(json_path), str(db_path))
+
+    (tmp_path / "datasette.yaml").write_text(
+        "x-overrides-extra-columns:\n  - field_one\n  - field_two\n"
+    )
+    load_products(str(json_path), str(db_path))
+
+    conn = sqlite3.connect(str(db_path))
+    cols = {row[1] for row in conn.execute("PRAGMA table_info(products_merged)")}
+    conn.close()
+
+    assert {"field_one", "field_two"}.issubset(cols)
+
+
+def test_ensure_overrides_extra_column_creation_is_idempotent(tmp_path, monkeypatch):
+    """SQLite's ALTER TABLE ADD COLUMN has no IF NOT EXISTS -- a second
+    transform run declaring the same config column must not error."""
+    monkeypatch.chdir(tmp_path)
+    (tmp_path / "datasette.yaml").write_text(
+        "x-overrides-extra-columns:\n  - operator_notes\n"
+    )
+    db_path = tmp_path / "products.db"
+    json_path = tmp_path / "shiny.json"
+    json_path.write_text(json.dumps([{"id": "aaa", "product_name": "X"}]))
+
+    load_products(str(json_path), str(db_path))
+    load_products(str(json_path), str(db_path))
+
+    conn = sqlite3.connect(str(db_path))
+    cols = [row[1] for row in conn.execute("PRAGMA table_info(products_overrides)")]
+    conn.close()
+
+    assert cols.count("operator_notes") == 1

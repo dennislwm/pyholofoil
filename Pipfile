@@ -8,6 +8,7 @@ datasette = "*"
 datasette-saved-queries = "*"
 datasette-plot = "*"
 datasette-write-ui = "*"
+pyyaml = "*"
 
 [dev-packages]
 pytest = "*"

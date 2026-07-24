@@ -192,3 +192,74 @@ def test_main_errors_when_input_dir_has_multiple_files(tmp_path, monkeypatch):
 
     assert "a.json" in str(excinfo.value)
     assert "b.csv" in str(excinfo.value)
+
+
+def test_products_overrides_table_creation_is_idempotent(tmp_path):
+    db_path = tmp_path / "products.db"
+    json_path = tmp_path / "shiny.json"
+    json_path.write_text(json.dumps([{"id": "aaa", "product_name": "X"}]))
+
+    load_products(str(json_path), str(db_path))
+    load_products(str(json_path), str(db_path))
+
+    conn = sqlite3.connect(str(db_path))
+    tables = conn.execute(
+        "SELECT name FROM sqlite_master WHERE type='table' "
+        "AND name='products_overrides'"
+    ).fetchall()
+    conn.close()
+
+    assert tables == [("products_overrides",)]
+
+
+def test_manual_override_survives_transform_rerun(tmp_path):
+    """Per ADR-09 (Policy C): a correction in products_overrides must
+    survive a subsequent transform re-run that legitimately updates other
+    columns on the same row -- this is the entire reason Policy C was
+    chosen over the rejected ephemeral (Policy A) alternative."""
+    db_path = tmp_path / "products.db"
+    json_path = tmp_path / "shiny.json"
+    json_path.write_text(json.dumps([
+        {"id": "aaa", "product_name": "Wrong Name", "value_total": "10"},
+    ]))
+    load_products(str(json_path), str(db_path))
+
+    conn = sqlite3.connect(str(db_path))
+    conn.execute(
+        "INSERT INTO products_overrides (id, product_name) VALUES (?, ?)",
+        ("aaa", "Correct Name"),
+    )
+    conn.commit()
+    conn.close()
+
+    json_path.write_text(json.dumps([
+        {"id": "aaa", "product_name": "Wrong Name", "value_total": "20"},
+    ]))
+    load_products(str(json_path), str(db_path))
+
+    conn = sqlite3.connect(str(db_path))
+    row = conn.execute(
+        "SELECT product_name, value_total FROM products_merged WHERE id = ?",
+        ("aaa",),
+    ).fetchone()
+    conn.close()
+
+    assert row == ("Correct Name", "20")
+
+
+def test_products_merged_falls_back_to_products_when_no_override(tmp_path):
+    db_path = tmp_path / "products.db"
+    json_path = tmp_path / "shiny.json"
+    json_path.write_text(json.dumps([
+        {"id": "aaa", "product_name": "151 Booster Box Case"},
+    ]))
+
+    load_products(str(json_path), str(db_path))
+
+    conn = sqlite3.connect(str(db_path))
+    row = conn.execute(
+        "SELECT product_name FROM products_merged WHERE id = ?", ("aaa",)
+    ).fetchone()
+    conn.close()
+
+    assert row == ("151 Booster Box Case",)

@@ -38,6 +38,31 @@ def _check_schema(conn, expected_columns, db_path):
         )
 
 
+def _ensure_overrides(conn, columns):
+    """Per ADR-09 (Policy C): products_overrides mirrors products' input
+    columns (not last_updated, which is transform-internal bookkeeping),
+    all nullable except id. transform never writes to this table --
+    write-ui's insert/update/delete permissions are scoped to it via
+    datasette.yaml, leaving products read-only through the UI. The
+    products_merged VIEW (COALESCE per column) is what explore browses,
+    so a manual correction here survives every future transform re-run."""
+    override_cols = [c for c in columns if c != "last_updated"]
+    conn.execute(
+        "CREATE TABLE IF NOT EXISTS products_overrides "
+        f"({', '.join(f'{c} TEXT' for c in override_cols)}, "
+        "PRIMARY KEY (id))"
+    )
+    merge_cols = ", ".join(
+        "p.id" if c == "id" else f"COALESCE(o.{c}, p.{c}) AS {c}"
+        for c in override_cols
+    )
+    conn.execute(
+        "CREATE VIEW IF NOT EXISTS products_merged AS "
+        f"SELECT {merge_cols}, p.last_updated FROM products p "
+        "LEFT JOIN products_overrides o ON p.id = o.id"
+    )
+
+
 def load_products(input_path, db_path):
     """Load a flat ShinyExport-shaped JSON or CSV array into one flat SQLite
     table.
@@ -72,6 +97,7 @@ def load_products(input_path, db_path):
         + ", ".join(f"{c} = excluded.{c}" for c in update_cols),
         [tuple(r.get(c) for c in columns[:-1]) + (now,) for r in records],
     )
+    _ensure_overrides(conn, columns)
     conn.commit()
     conn.close()
 

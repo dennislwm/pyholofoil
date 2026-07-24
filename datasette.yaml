@@ -1,0 +1,8 @@
+databases:
+  products:
+    tables:
+      products:
+        permissions:
+          insert-row: false
+          update-row: false
+          delete-row: false

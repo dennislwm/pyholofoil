@@ -96,13 +96,12 @@ def test_load_products_sets_last_updated_on_write(tmp_path):
     assert last_updated is not None
 
 
-def test_load_products_against_pre_adr06_schema_table_crashes(tmp_path):
-    """Characterizes a known gap: a products.db left over from before ADR-06
-    still has the old snapshot_date-keyed schema (no last_updated column).
-    CREATE TABLE IF NOT EXISTS is a no-op against it, so the new upsert
-    crashes instead of migrating. This test documents today's behavior, not
-    a fix -- whether to auto-migrate or require deleting the stale db is an
-    open decision, not a defect with one obvious answer."""
+def test_load_products_against_pre_adr06_schema_table_fails_clearly(tmp_path):
+    """Per ADR-08: a products.db left over from before ADR-06 still has the
+    old snapshot_date-keyed schema (no last_updated column, no PRIMARY
+    KEY(id)). _check_schema() generically detects this mismatch and raises
+    SystemExit with a rename-based recovery instruction, instead of letting
+    a raw sqlite3.OperationalError surface."""
     db_path = tmp_path / "products.db"
     conn = sqlite3.connect(str(db_path))
     conn.execute(
@@ -120,7 +119,7 @@ def test_load_products_against_pre_adr06_schema_table_crashes(tmp_path):
     json_path = tmp_path / "shiny.json"
     json_path.write_text(json.dumps([{"id": "aaa", "product_name": "X"}]))
 
-    with pytest.raises(sqlite3.OperationalError):
+    with pytest.raises(SystemExit, match="stale"):
         load_products(str(json_path), str(db_path))
 
 

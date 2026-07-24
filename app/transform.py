@@ -17,6 +17,27 @@ def _read_records(input_path):
         return json.load(f)
 
 
+def _check_schema(conn, expected_columns, db_path):
+    """Per ADR-08: generically compare products' actual schema (columns and
+    primary key) against what THIS run currently expects, rather than
+    checking for one hardcoded column -- catches staleness from any
+    schema-changing ADR, not just the one already known. No-op if the
+    table doesn't exist yet."""
+    info = conn.execute("PRAGMA table_info(products)").fetchall()
+    if not info:
+        return
+    actual_columns = {row[1] for row in info}
+    pk_column = next((row[1] for row in info if row[5] == 1), None)
+    if not expected_columns.issubset(actual_columns) or pk_column != "id":
+        timestamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S")
+        raise SystemExit(
+            "products table is stale (schema mismatch with what this "
+            "version of transform expects) -- rename it to recover: "
+            f'sqlite3 {db_path} "ALTER TABLE products RENAME TO '
+            f'products_stale_{timestamp}"'
+        )
+
+
 def load_products(input_path, db_path):
     """Load a flat ShinyExport-shaped JSON or CSV array into one flat SQLite
     table.
@@ -36,6 +57,7 @@ def load_products(input_path, db_path):
 
     columns = list(records[0].keys()) + ["last_updated"]
     conn = sqlite3.connect(db_path)
+    _check_schema(conn, set(columns), db_path)
     conn.execute(
         "CREATE TABLE IF NOT EXISTS products "
         f"({', '.join(f'{c} TEXT' for c in columns)}, "

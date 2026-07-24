@@ -54,13 +54,30 @@ def load_products(input_path, db_path):
     conn.close()
 
 
+def _pick_input_file(input_dir):
+    """Per REQ-009: pick up whichever single file is present in input_dir,
+    no fixed filename required. Never guess a "latest" file -- mtime is
+    fragile (depends on how a file was copied) and the filename is not
+    parsed for a date."""
+    files = sorted(os.listdir(input_dir)) if os.path.isdir(input_dir) else []
+    if not files:
+        raise SystemExit(f"No input file found in {input_dir}/")
+    if len(files) > 1:
+        raise SystemExit(
+            f"Multiple input files found in {input_dir}/: {', '.join(files)}"
+        )
+    return os.path.join(input_dir, files[0])
+
+
 def main(argv=None):
     parser = argparse.ArgumentParser()
-    parser.add_argument("input_path")
+    parser.add_argument("input_path", nargs="?", default=None)
     parser.add_argument("--db-path", default="data/products.db")
+    parser.add_argument("--input-dir", default="input")
     args = parser.parse_args(argv)
+    input_path = args.input_path or _pick_input_file(args.input_dir)
     os.makedirs(os.path.dirname(args.db_path), exist_ok=True)
-    load_products(args.input_path, args.db_path)
+    load_products(input_path, args.db_path)
 
 
 if __name__ == "__main__":

@@ -1,6 +1,8 @@
 import json
 import sqlite3
 
+import pytest
+
 from app.transform import load_products, main
 
 
@@ -124,3 +126,42 @@ def test_main_writes_to_conventional_default_db_path(tmp_path, monkeypatch):
     conn.close()
 
     assert count == 1
+
+
+def test_main_picks_up_the_single_file_in_input_dir(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    input_dir = tmp_path / "input"
+    input_dir.mkdir()
+    (input_dir / "shiny.json").write_text(json.dumps([
+        {"id": "aaa", "product_name": "151 Booster Box Case", "set_name": "Pokémon Card 151"},
+    ]))
+
+    main([])
+
+    conn = sqlite3.connect(str(tmp_path / "data" / "products.db"))
+    count = conn.execute("SELECT COUNT(*) FROM products").fetchone()[0]
+    conn.close()
+
+    assert count == 1
+
+
+def test_main_errors_when_input_dir_has_no_files(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    (tmp_path / "input").mkdir()
+
+    with pytest.raises(SystemExit):
+        main([])
+
+
+def test_main_errors_when_input_dir_has_multiple_files(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    input_dir = tmp_path / "input"
+    input_dir.mkdir()
+    (input_dir / "a.json").write_text("[]")
+    (input_dir / "b.csv").write_text("")
+
+    with pytest.raises(SystemExit) as excinfo:
+        main([])
+
+    assert "a.json" in str(excinfo.value)
+    assert "b.csv" in str(excinfo.value)

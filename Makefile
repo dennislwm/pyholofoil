@@ -8,7 +8,7 @@ help:
 	@echo "  setup      pipenv install from Pipfile"
 	@echo "  status     Check system dependencies"
 	@echo "  test       Run test suite"
-	@echo "  transform  Load a ShinyExport JSON or CSV snapshot into data/products.db (INPUT_PATH=path/to.json|csv)"
+	@echo "  transform  Load a ShinyExport JSON or CSV snapshot into data/products.db (default: the single file in input/, or INPUT_PATH=path/to.json|csv)"
 	@echo "  build      Materialize data/products_public.db, redacted per sensitive_fields.json (ADR-04)"
 	@echo "  explore    Open the transformed SQLite file in Datasette (default data/products.db, override with DB_PATH=path/to.db)"
 	@echo ""

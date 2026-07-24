@@ -2,37 +2,41 @@ import argparse
 import json
 import os
 import sqlite3
+from datetime import datetime, timezone
 
 
-def load_products(json_path, db_path, snapshot_date):
+def load_products(json_path, db_path):
     """Load a flat ShinyExport-shaped JSON array into one flat SQLite table.
 
     Per ADR-01: single flat table, scoped to catalog-resolved sources
     (records carrying a catalog-match ID such as tcgplayer_id).
 
-    Per REQ-004: snapshot_date attributes each row to the snapshot it came
-    from -- set at load time by the caller, not parsed from the filename
-    inside this function.
-
-    Idempotent: re-running with the same snapshot_date replaces that
-    snapshot's rows rather than duplicating them.
+    Per ADR-06: id-keyed upsert. `id` is the only field observed stable
+    across real snapshots -- re-running on the same or a new file updates
+    existing rows in place rather than duplicating or partitioning by a
+    caller-supplied date. `last_updated` is set by the write itself, never
+    caller-supplied, so it cannot be mismatched the way snapshot_date was.
     """
     with open(json_path) as f:
         records = json.load(f)
     if not records:
         return
 
-    columns = list(records[0].keys()) + ["snapshot_date"]
+    columns = list(records[0].keys()) + ["last_updated"]
     conn = sqlite3.connect(db_path)
     conn.execute(
         "CREATE TABLE IF NOT EXISTS products "
-        f"({', '.join(f'{c} TEXT' for c in columns)})"
+        f"({', '.join(f'{c} TEXT' for c in columns)}, "
+        "PRIMARY KEY (id))"
     )
-    conn.execute("DELETE FROM products WHERE snapshot_date = ?", (snapshot_date,))
     placeholders = ", ".join("?" for _ in columns)
+    update_cols = [c for c in columns if c != "id"]
+    now = datetime.now(timezone.utc).isoformat()
     conn.executemany(
-        f"INSERT INTO products ({', '.join(columns)}) VALUES ({placeholders})",
-        [tuple(r.get(c) for c in columns[:-1]) + (snapshot_date,) for r in records],
+        f"INSERT INTO products ({', '.join(columns)}) VALUES ({placeholders}) "
+        "ON CONFLICT(id) DO UPDATE SET "
+        + ", ".join(f"{c} = excluded.{c}" for c in update_cols),
+        [tuple(r.get(c) for c in columns[:-1]) + (now,) for r in records],
     )
     conn.commit()
     conn.close()
@@ -41,11 +45,10 @@ def load_products(json_path, db_path, snapshot_date):
 def main(argv=None):
     parser = argparse.ArgumentParser()
     parser.add_argument("json_path")
-    parser.add_argument("snapshot_date")
     parser.add_argument("--db-path", default="data/products.db")
     args = parser.parse_args(argv)
     os.makedirs(os.path.dirname(args.db_path), exist_ok=True)
-    load_products(args.json_path, args.db_path, args.snapshot_date)
+    load_products(args.json_path, args.db_path)
 
 
 if __name__ == "__main__":

@@ -8,7 +8,7 @@ help:
 	@echo "  setup      pipenv install from Pipfile"
 	@echo "  status     Check system dependencies"
 	@echo "  test       Run test suite"
-	@echo "  transform  Load a ShinyExport JSON snapshot into data/products.db (JSON_PATH=path/to.json SNAPSHOT_DATE=YYYYMMDD)"
+	@echo "  transform  Load a ShinyExport JSON snapshot into data/products.db (JSON_PATH=path/to.json)"
 	@echo "  build      Materialize data/products_public.db, redacted per sensitive_fields.json (ADR-04)"
 	@echo "  explore    Open the transformed SQLite file in Datasette (default data/products.db, override with DB_PATH=path/to.db)"
 	@echo ""
@@ -25,7 +25,7 @@ test:
 	pipenv run python -m pytest tests/
 
 transform:
-	pipenv run python -m app.transform $(JSON_PATH) $(SNAPSHOT_DATE)
+	pipenv run python -m app.transform $(JSON_PATH)
 
 build:
 	pipenv run python -m app.build

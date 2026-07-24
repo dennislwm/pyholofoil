@@ -96,6 +96,34 @@ def test_load_products_sets_last_updated_on_write(tmp_path):
     assert last_updated is not None
 
 
+def test_load_products_against_pre_adr06_schema_table_crashes(tmp_path):
+    """Characterizes a known gap: a products.db left over from before ADR-06
+    still has the old snapshot_date-keyed schema (no last_updated column).
+    CREATE TABLE IF NOT EXISTS is a no-op against it, so the new upsert
+    crashes instead of migrating. This test documents today's behavior, not
+    a fix -- whether to auto-migrate or require deleting the stale db is an
+    open decision, not a defect with one obvious answer."""
+    db_path = tmp_path / "products.db"
+    conn = sqlite3.connect(str(db_path))
+    conn.execute(
+        "CREATE TABLE products (id TEXT, product_name TEXT, set_name TEXT, "
+        "brand_name TEXT, discriminator TEXT, rarity TEXT, quantity TEXT, "
+        "value_total TEXT, value_per_unit TEXT, value_currency TEXT, "
+        "paid_total TEXT, paid_per_unit TEXT, paid_currency TEXT, "
+        "grade_type TEXT, grade_subtype TEXT, group_name TEXT, "
+        "group_wishlist TEXT, tcgplayer_id TEXT, pricecharting_id TEXT, "
+        "doubleholo_id TEXT, date_added TEXT, tag TEXT, snapshot_date TEXT)"
+    )
+    conn.commit()
+    conn.close()
+
+    json_path = tmp_path / "shiny.json"
+    json_path.write_text(json.dumps([{"id": "aaa", "product_name": "X"}]))
+
+    with pytest.raises(sqlite3.OperationalError):
+        load_products(str(json_path), str(db_path))
+
+
 def test_load_products_accepts_csv(tmp_path):
     csv_path = tmp_path / "shiny.csv"
     csv_path.write_text(

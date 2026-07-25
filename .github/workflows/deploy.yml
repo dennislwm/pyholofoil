@@ -13,3 +13,9 @@ jobs:
         run: make build
       - name: Deploy to Vercel
         run: make deploy
+      - name: Sync live artifact to Google Sheets
+        env:
+          GOOGLE_WORKSPACE_CLI_CREDENTIALS_FILE: ${{ vars.GOOGLE_WORKSPACE_CLI_CREDENTIALS_FILE }}
+          GOOGLE_WORKSPACE_PROJECT_ID: ${{ vars.GOOGLE_WORKSPACE_PROJECT_ID }}
+          SPREADSHEET_ID: ${{ vars.SPREADSHEET_ID }}
+        run: make sync-sheets

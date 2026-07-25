@@ -4,17 +4,17 @@ verify_ssl = true
 name = "pypi"
 
 [packages]
-datasette = "*"
-datasette-saved-queries = "*"
-datasette-plot = "*"
-datasette-write-ui = "*"
-datasette-create-view = "*"
-datasette-edit-schema = "*"
-datasette-publish-vercel = "*"
-pyyaml = "*"
+datasette = "==1.0a19"
+datasette-saved-queries = "==0.2.2"
+datasette-plot = "==0.1.0"
+datasette-write-ui = "==0.0.1a13"
+datasette-create-view = "==0.1"
+datasette-edit-schema = "==0.7.1"
+datasette-publish-vercel = "==0.14.2"
+pyyaml = "==6.0.3"
 
 [dev-packages]
-pytest = "*"
+pytest = "==9.1.1"
 
 [requires]
 python_version = "3.12"

@@ -1,4 +1,4 @@
-.PHONY: help setup status test explore transform build deploy
+.PHONY: help setup status test check-pins explore transform build deploy
 SHELL := /bin/bash
 
 help:
@@ -8,6 +8,7 @@ help:
 	@echo "  setup      pipenv install from Pipfile"
 	@echo "  status     Check system dependencies"
 	@echo "  test       Run test suite"
+	@echo "  check-pins Fail if any Pipfile package is unpinned (bare \"*\")"
 	@echo "  transform  Load a ShinyExport JSON or CSV snapshot into data/products.db (default: the single file in input/, or INPUT_PATH=path/to.json|csv)"
 	@echo "  build      Materialize data/products_public.db, redacted per sensitive_fields.json (ADR-04)"
 	@echo "  deploy     Publish data/products_public.db to Vercel via datasette-publish-vercel (ADR-12) -- no datasette.yaml applied, products_overrides doesn't exist in this artifact"
@@ -27,6 +28,9 @@ status:
 
 test:
 	pipenv run python -m pytest tests/
+
+check-pins:
+	@! grep -n '= "\*"' Pipfile
 
 transform:
 	pipenv run python -m app.transform $(INPUT_PATH)

@@ -10,6 +10,7 @@ datasette-plot = "*"
 datasette-write-ui = "*"
 datasette-create-view = "*"
 datasette-edit-schema = "*"
+datasette-publish-vercel = "*"
 pyyaml = "*"
 
 [dev-packages]

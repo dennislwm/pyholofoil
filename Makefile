@@ -1,4 +1,4 @@
-.PHONY: help setup status test explore transform build
+.PHONY: help setup status test explore transform build deploy
 SHELL := /bin/bash
 
 help:
@@ -10,11 +10,14 @@ help:
 	@echo "  test       Run test suite"
 	@echo "  transform  Load a ShinyExport JSON or CSV snapshot into data/products.db (default: the single file in input/, or INPUT_PATH=path/to.json|csv)"
 	@echo "  build      Materialize data/products_public.db, redacted per sensitive_fields.json (ADR-04)"
+	@echo "  deploy     Publish data/products_public.db to Vercel via datasette-publish-vercel (ADR-12) -- no datasette.yaml applied, products_overrides doesn't exist in this artifact"
 	@echo "  explore    Open the transformed SQLite file in Datasette (default data/products.db, override with DB_PATH=path/to.db). Prints a --root URL: visit it to get write access to products_overrides (ADR-09); products itself stays read-only."
 	@echo ""
 
 DB_PATH ?= data/products.db
 SOURCE_TABLE ?= products_merged
+REDACTED_DB_PATH ?= data/products_public.db
+VERCEL_PROJECT ?= pyholofoil-public
 
 setup:
 	@source ./make.sh && setup_commands
@@ -33,3 +36,6 @@ build:
 
 explore:
 	pipenv run datasette $(DB_PATH) -c datasette.yaml --root
+
+deploy:
+	pipenv run datasette publish vercel $(REDACTED_DB_PATH) --project=$(VERCEL_PROJECT)

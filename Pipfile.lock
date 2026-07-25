@@ -1,7 +1,7 @@
 {
     "_meta": {
         "hash": {
-            "sha256": "9fdbcbe652bc0e7720e30dfb1312af94a48fa6e07e272f2f40a44493571bcc57"
+            "sha256": "9f8e77668023621a5633752b7680760e8ae79bd3ba7642330610013f5560efa3"
         },
         "pipfile-spec": 6,
         "requires": {
@@ -88,6 +88,24 @@
             "index": "pypi",
             "markers": "python_version >= '3.10'",
             "version": "==1.0a37"
+        },
+        "datasette-create-view": {
+            "hashes": [
+                "sha256:b8dd84c511c18f8de549674061f7c85d91711a429624ec108d4f1b95945423e1",
+                "sha256:ef14d23504f96bc3a9798c99c5c49b251c9b1272325b3df4dae32843a4b39a88"
+            ],
+            "index": "pypi",
+            "markers": "python_version >= '3.8'",
+            "version": "==0.1"
+        },
+        "datasette-edit-schema": {
+            "hashes": [
+                "sha256:060dbd8d0c96038aafd7d8efcb5efdf98f785edd4603eca555678e47f5efcbf1",
+                "sha256:e7de83533bbb441ed0f392b2cae9a2871931be917f69cbad1d60c79cac1dbe08"
+            ],
+            "index": "pypi",
+            "markers": "python_version >= '3.7'",
+            "version": "==0.7.1"
         },
         "datasette-plot": {
             "hashes": [

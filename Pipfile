@@ -8,6 +8,8 @@ datasette = "*"
 datasette-saved-queries = "*"
 datasette-plot = "*"
 datasette-write-ui = "*"
+datasette-create-view = "*"
+datasette-edit-schema = "*"
 pyyaml = "*"
 
 [dev-packages]

@@ -26,3 +26,5 @@ databases:
           insert-row: false
           update-row: false
           delete-row: false
+          alter-table: false
+          drop-table: false

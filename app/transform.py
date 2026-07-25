@@ -5,7 +5,21 @@ import os
 import sqlite3
 from datetime import datetime, timezone
 
+import jsonschema
 import yaml
+
+
+def _validate_records(records, schema_path="input_schema.json"):
+    """Per ADR-15: fail loudly on a ShinyExport format drift (a renamed,
+    dropped, or missing field) instead of silently writing NULL into an
+    id-keyed row. Raises on the first invalid record, naming its index."""
+    with open(schema_path) as f:
+        schema = json.load(f)
+    for i, record in enumerate(records):
+        try:
+            jsonschema.validate(instance=record, schema=schema)
+        except jsonschema.ValidationError as e:
+            raise SystemExit(f"Record {i} failed validation: {e.message}") from e
 
 
 def _read_records(input_path):
@@ -113,6 +127,7 @@ def load_products(input_path, db_path):
     records = _read_records(input_path)
     if not records:
         return
+    _validate_records(records)
 
     columns = list(records[0].keys()) + ["last_updated"]
     conn = sqlite3.connect(db_path)

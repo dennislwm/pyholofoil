@@ -338,3 +338,20 @@ def test_ensure_overrides_extra_column_creation_is_idempotent(tmp_path, monkeypa
     conn.close()
 
     assert cols.count("operator_notes") == 1
+
+
+def test_load_products_refuses_record_missing_id(tmp_path, monkeypatch):
+    """Per ADR-15: a record missing a field records[0] had (e.g. a
+    ShinyExport export-format drift dropping "id") must fail loudly, not
+    silently write None into the id-keyed primary key -- verified live this
+    session that the old .get()-based path did exactly that."""
+    monkeypatch.chdir(tmp_path)
+    db_path = tmp_path / "products.db"
+    json_path = tmp_path / "shiny.json"
+    json_path.write_text(json.dumps([
+        {"id": "aaa", "product_name": "Box"},
+        {"product_name": "Missing id"},
+    ]))
+
+    with pytest.raises(SystemExit):
+        load_products(str(json_path), str(db_path))

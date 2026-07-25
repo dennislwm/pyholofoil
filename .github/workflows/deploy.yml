@@ -9,6 +9,8 @@ jobs:
     runs-on: [self-hosted, macOS]
     steps:
       - uses: actions/checkout@v4
+      - name: Run test suite
+        run: make test
       - name: Build redacted artifact
         run: make build
       - name: Deploy to Vercel

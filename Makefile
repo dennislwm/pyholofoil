@@ -11,7 +11,7 @@ help:
 	@echo "  check-pins Fail if any Pipfile package is unpinned (bare \"*\")"
 	@echo "  transform  Load a ShinyExport JSON or CSV snapshot into data/products.db (default: the single file in input/, or INPUT_PATH=path/to.json|csv)"
 	@echo "  build      Materialize data/products_public.db, redacted per sensitive_fields.json (ADR-04)"
-	@echo "  deploy     Publish data/products_public.db to Vercel via datasette-publish-vercel (ADR-12) -- no datasette.yaml applied, products_overrides doesn't exist in this artifact"
+	@echo "  deploy     Verify REDACTED_DB_PATH excludes every sensitive_fields.json column (REQ-013), then publish it to Vercel via datasette-publish-vercel (ADR-12) -- no datasette.yaml applied, products_overrides doesn't exist in this artifact"
 	@echo "  explore    Open the transformed SQLite file in Datasette (default data/products.db, override with DB_PATH=path/to.db). Prints a --root URL: visit it to get write access to products_overrides (ADR-09); products itself stays read-only."
 	@echo "  sync-sheets  Push products_merged (full data, including sensitive fields -- this is the live artifact, not the redacted one) to a Google Sheet via gws (ADR-14). Requires SPREADSHEET_ID, GOOGLE_WORKSPACE_CLI_CREDENTIALS_FILE (service account key path), and GOOGLE_WORKSPACE_PROJECT_ID (quota/billing project -- may differ from the key file's own project). The Sheet's own sharing settings control who can view it -- same as any personal Google Sheet, not automatically public."
 	@echo ""
@@ -46,4 +46,5 @@ sync-sheets:
 	pipenv run python -m app.sync_sheets --db-path $(DB_PATH) --spreadsheet-id $(SPREADSHEET_ID)
 
 deploy:
+	pipenv run python -m app.build --verify-only --redacted-db-path $(REDACTED_DB_PATH)
 	pipenv run datasette publish vercel $(REDACTED_DB_PATH) --project=$(VERCEL_PROJECT)

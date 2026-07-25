@@ -42,6 +42,11 @@ def build_redacted(
             f"Approved: {approved_anchor!r}, current: {current_anchor!r}."
         )
 
+    # ponytail: source_table/columns are f-string interpolated into SQL, not
+    # parameterized (SQLite params can't bind identifiers). Safe today since
+    # source_table only ever comes from a trusted local CLI/Makefile arg --
+    # validate against this PRAGMA's own column list first if that ever
+    # changes to less-trusted input.
     columns = [row[1] for row in conn.execute(f"PRAGMA table_info({source_table})")]
     kept = [c for c in columns if c not in sensitive_fields]
 
@@ -54,6 +59,27 @@ def build_redacted(
     conn.close()
 
 
+def verify_redacted(redacted_db_path, sensitive_fields_path, table="products"):
+    """Refuse to let a non-redacted artifact reach deploy, per REQ-013.
+
+    Checks the actual file about to be published contains none of the
+    columns sensitive_fields.json says must be excluded -- catches a stale
+    REDACTED_DB_PATH override or any artifact that reached this path
+    without going through build_redacted().
+    """
+    with open(sensitive_fields_path) as f:
+        sensitive_fields = set(json.load(f))
+    conn = sqlite3.connect(redacted_db_path)
+    columns = {row[1] for row in conn.execute(f"PRAGMA table_info({table})")}
+    conn.close()
+    leaked = columns & sensitive_fields
+    if leaked:
+        raise SystemExit(
+            f"{redacted_db_path} contains sensitive field(s) {sorted(leaked)} -- "
+            f"refusing to deploy. Re-run build, or check REDACTED_DB_PATH."
+        )
+
+
 def main(argv=None):
     parser = argparse.ArgumentParser()
     parser.add_argument("--full-db-path", default="data/products.db")
@@ -61,7 +87,11 @@ def main(argv=None):
     parser.add_argument("--sensitive-fields-path", default="sensitive_fields.json")
     parser.add_argument("--approved-file-path", default="data/products.approved")
     parser.add_argument("--source-table", default="products_merged")
+    parser.add_argument("--verify-only", action="store_true")
     args = parser.parse_args(argv)
+    if args.verify_only:
+        verify_redacted(args.redacted_db_path, args.sensitive_fields_path)
+        return
     os.makedirs(os.path.dirname(args.redacted_db_path) or ".", exist_ok=True)
     build_redacted(
         args.full_db_path,

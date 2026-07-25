@@ -3,7 +3,7 @@ import sqlite3
 
 import pytest
 
-from app.build import build_redacted, main
+from app.build import build_redacted, main, verify_redacted
 
 
 def _make_full_db(path, rows, last_updated="2026-07-25T00:00:00+00:00"):
@@ -142,3 +142,34 @@ def test_build_redacted_default_source_table_includes_overrides(tmp_path):
     conn.close()
 
     assert rows == [("Corrected Box",)]
+
+
+def test_verify_redacted_passes_on_clean_artifact(tmp_path):
+    redacted_db = tmp_path / "redacted.db"
+    conn = sqlite3.connect(str(redacted_db))
+    conn.execute("CREATE TABLE products (product_name TEXT)")
+    conn.commit()
+    conn.close()
+
+    fields_path = tmp_path / "sensitive_fields.json"
+    fields_path.write_text(json.dumps(["secret_field"]))
+
+    verify_redacted(str(redacted_db), str(fields_path))
+
+
+def test_verify_redacted_refuses_leaked_sensitive_field(tmp_path):
+    """Per REQ-013: deploy must refuse to publish an artifact that still
+    contains a sensitive column -- e.g. a stale REDACTED_DB_PATH override
+    pointed straight at the unredacted full db, which nothing caught
+    before this check existed."""
+    redacted_db = tmp_path / "redacted.db"
+    conn = sqlite3.connect(str(redacted_db))
+    conn.execute("CREATE TABLE products (product_name TEXT, secret_field TEXT)")
+    conn.commit()
+    conn.close()
+
+    fields_path = tmp_path / "sensitive_fields.json"
+    fields_path.write_text(json.dumps(["secret_field"]))
+
+    with pytest.raises(SystemExit):
+        verify_redacted(str(redacted_db), str(fields_path))

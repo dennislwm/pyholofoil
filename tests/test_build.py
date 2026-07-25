@@ -35,7 +35,7 @@ def test_build_redacted_removes_sensitive_fields(tmp_path):
     approved_path = _approve(tmp_path, anchor)
 
     redacted_db = tmp_path / "redacted.db"
-    build_redacted(str(full_db), str(redacted_db), str(fields_path), str(approved_path))
+    build_redacted(str(full_db), str(redacted_db), str(fields_path), str(approved_path), "products")
 
     conn = sqlite3.connect(str(redacted_db))
     columns = [row[1] for row in conn.execute("PRAGMA table_info(products)")]
@@ -55,8 +55,8 @@ def test_build_redacted_is_idempotent(tmp_path):
     approved_path = _approve(tmp_path, anchor)
 
     redacted_db = tmp_path / "redacted.db"
-    build_redacted(str(full_db), str(redacted_db), str(fields_path), str(approved_path))
-    build_redacted(str(full_db), str(redacted_db), str(fields_path), str(approved_path))
+    build_redacted(str(full_db), str(redacted_db), str(fields_path), str(approved_path), "products")
+    build_redacted(str(full_db), str(redacted_db), str(fields_path), str(approved_path), "products")
 
     conn = sqlite3.connect(str(redacted_db))
     count = conn.execute("SELECT COUNT(*) FROM products").fetchone()[0]
@@ -75,7 +75,9 @@ def test_build_redacted_refuses_without_approval(tmp_path):
 
     redacted_db = tmp_path / "redacted.db"
     with pytest.raises(SystemExit):
-        build_redacted(str(full_db), str(redacted_db), str(fields_path), str(missing_approved_path))
+        build_redacted(
+            str(full_db), str(redacted_db), str(fields_path), str(missing_approved_path), "products"
+        )
 
 
 def test_build_redacted_refuses_on_stale_approval(tmp_path):
@@ -88,13 +90,18 @@ def test_build_redacted_refuses_on_stale_approval(tmp_path):
 
     redacted_db = tmp_path / "redacted.db"
     with pytest.raises(SystemExit):
-        build_redacted(str(full_db), str(redacted_db), str(fields_path), str(approved_path))
+        build_redacted(str(full_db), str(redacted_db), str(fields_path), str(approved_path), "products")
 
 
 def test_main_writes_to_conventional_default_paths(tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)
     (tmp_path / "data").mkdir()
-    anchor = _make_full_db(tmp_path / "data" / "products.db", [("Box", "hidden")])
+    db_path = tmp_path / "data" / "products.db"
+    anchor = _make_full_db(db_path, [("Box", "hidden")])
+    conn = sqlite3.connect(str(db_path))
+    conn.execute("CREATE VIEW products_merged AS SELECT * FROM products")
+    conn.commit()
+    conn.close()
     (tmp_path / "sensitive_fields.json").write_text(json.dumps(["secret_field"]))
     (tmp_path / "data" / "products.approved").write_text(anchor)
 
@@ -105,3 +112,33 @@ def test_main_writes_to_conventional_default_paths(tmp_path, monkeypatch):
     conn.close()
 
     assert columns == ["product_name", "last_updated"]
+
+
+def test_build_redacted_default_source_table_includes_overrides(tmp_path):
+    """Per REQ-012: default source_table (products_merged) surfaces
+    operator corrections that build_redacted() previously could never see
+    when hardcoded to products."""
+    full_db = tmp_path / "full.db"
+    anchor = _make_full_db(full_db, [("Box", "hidden")])
+    conn = sqlite3.connect(str(full_db))
+    conn.execute(
+        "CREATE VIEW products_merged AS "
+        "SELECT 'Corrected Box' AS product_name, secret_field, last_updated FROM products"
+    )
+    conn.commit()
+    conn.close()
+
+    fields_path = tmp_path / "sensitive_fields.json"
+    fields_path.write_text(json.dumps(["secret_field"]))
+    approved_path = _approve(tmp_path, anchor)
+
+    redacted_db = tmp_path / "redacted.db"
+    build_redacted(
+        str(full_db), str(redacted_db), str(fields_path), str(approved_path), "products_merged"
+    )
+
+    conn = sqlite3.connect(str(redacted_db))
+    rows = conn.execute("SELECT product_name FROM products").fetchall()
+    conn.close()
+
+    assert rows == [("Corrected Box",)]

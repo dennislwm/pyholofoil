@@ -14,6 +14,7 @@ help:
 	@echo ""
 
 DB_PATH ?= data/products.db
+SOURCE_TABLE ?= products_merged
 
 setup:
 	@source ./make.sh && setup_commands
@@ -28,7 +29,7 @@ transform:
 	pipenv run python -m app.transform $(INPUT_PATH)
 
 build:
-	pipenv run python -m app.build
+	pipenv run python -m app.build --source-table $(SOURCE_TABLE)
 
 explore:
 	pipenv run datasette $(DB_PATH) -c datasette.yaml --root

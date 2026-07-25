@@ -1,0 +1,15 @@
+name: Deploy public copy
+
+on:
+  push:
+    branches: [main]
+
+jobs:
+  deploy:
+    runs-on: [self-hosted, macOS]
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build redacted artifact
+        run: make build
+      - name: Deploy to Vercel
+        run: make deploy

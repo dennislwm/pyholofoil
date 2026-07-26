@@ -3,7 +3,7 @@ import sqlite3
 
 import pytest
 
-from app.build import build_redacted, main, verify_redacted
+from app.build import build_redacted, main, publish_static, verify_redacted
 
 
 def _make_full_db(path, rows, last_updated="2026-07-25T00:00:00+00:00"):
@@ -173,3 +173,32 @@ def test_verify_redacted_refuses_leaked_sensitive_field(tmp_path):
 
     with pytest.raises(SystemExit):
         verify_redacted(str(redacted_db), str(fields_path))
+
+
+def test_publish_static_copies_into_docs_dir(tmp_path):
+    """Per ADR-16: the public copy is served as a static file (datasette-lite
+    loads it directly), so deploy just needs a plain copy into the static
+    host's serving directory (e.g. GitHub Pages' docs/)."""
+    redacted_db = tmp_path / "redacted.db"
+    redacted_db.write_bytes(b"fake sqlite bytes")
+    docs_dir = tmp_path / "docs"
+
+    dest = publish_static(str(redacted_db), str(docs_dir))
+
+    assert dest == str(docs_dir / "products_public.db")
+    assert (docs_dir / "products_public.db").read_bytes() == b"fake sqlite bytes"
+
+
+def test_publish_static_is_idempotent(tmp_path):
+    """Re-running deploy on the same artifact must not duplicate or corrupt
+    the published copy -- a second copy overwrites cleanly."""
+    redacted_db = tmp_path / "redacted.db"
+    redacted_db.write_bytes(b"version one")
+    docs_dir = tmp_path / "docs"
+
+    publish_static(str(redacted_db), str(docs_dir))
+    redacted_db.write_bytes(b"version two")
+    publish_static(str(redacted_db), str(docs_dir))
+
+    assert (docs_dir / "products_public.db").read_bytes() == b"version two"
+    assert list(docs_dir.iterdir()) == [docs_dir / "products_public.db"]

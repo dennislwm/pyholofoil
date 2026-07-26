@@ -1,7 +1,7 @@
 {
     "_meta": {
         "hash": {
-            "sha256": "ec598cba9d1ab7d621d9e7c37f6e1506e0af82635429df1b6f7522ad1423d5b3"
+            "sha256": "2feae94dd0ef7c88a28820a691374fb0e5cac0de5abdacf5f87cc2fd99a72ec1"
         },
         "pipfile-spec": 6,
         "requires": {
@@ -123,14 +123,6 @@
             "index": "pypi",
             "markers": "python_version >= '3.8'",
             "version": "==0.1.0"
-        },
-        "datasette-publish-vercel": {
-            "hashes": [
-                "sha256:5c6ba4ce54898c79c62eeeb27b79437773e569fbc2da3fba8a3f9dd2cb8908f6",
-                "sha256:9632bbed0012941bf171510ea39d79ae8db0977d99300f1c36b176ea00cc05d5"
-            ],
-            "index": "pypi",
-            "version": "==0.14.2"
         },
         "datasette-saved-queries": {
             "hashes": [

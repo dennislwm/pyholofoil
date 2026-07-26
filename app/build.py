@@ -1,6 +1,7 @@
 import argparse
 import json
 import os
+import shutil
 import sqlite3
 
 
@@ -80,6 +81,18 @@ def verify_redacted(redacted_db_path, sensitive_fields_path, table="products"):
         )
 
 
+def publish_static(redacted_db_path, docs_dir="docs"):
+    """Copy the redacted artifact into a static host's serving directory
+    (e.g. GitHub Pages' docs/), per ADR-16 -- datasette-lite loads this file
+    directly in the visitor's browser, no server involved. Idempotent:
+    overwrites the same destination filename rather than accumulating copies.
+    """
+    os.makedirs(docs_dir, exist_ok=True)
+    dest_path = os.path.join(docs_dir, "products_public.db")
+    shutil.copyfile(redacted_db_path, dest_path)
+    return dest_path
+
+
 def main(argv=None):
     parser = argparse.ArgumentParser()
     parser.add_argument("--full-db-path", default="data/products.db")
@@ -88,9 +101,15 @@ def main(argv=None):
     parser.add_argument("--approved-file-path", default="data/products.approved")
     parser.add_argument("--source-table", default="products_merged")
     parser.add_argument("--verify-only", action="store_true")
+    parser.add_argument("--publish-static", action="store_true")
+    parser.add_argument("--docs-dir", default="docs")
     args = parser.parse_args(argv)
     if args.verify_only:
         verify_redacted(args.redacted_db_path, args.sensitive_fields_path)
+        return
+    if args.publish_static:
+        dest = publish_static(args.redacted_db_path, args.docs_dir)
+        print(dest)
         return
     os.makedirs(os.path.dirname(args.redacted_db_path) or ".", exist_ok=True)
     build_redacted(

@@ -10,7 +10,6 @@ datasette-plot = "==0.1.0"
 datasette-write-ui = "==0.0.1a13"
 datasette-create-view = "==0.1"
 datasette-edit-schema = "==0.7.1"
-datasette-publish-vercel = "==0.14.2"
 pyyaml = "==6.0.3"
 jsonschema = "==4.26.0"
 

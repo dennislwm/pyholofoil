@@ -20,6 +20,13 @@ databases:
           ON CONFLICT(id) DO NOTHING
         write: true
         on_success_redirect: /products/products_overrides
+      copy-to-overrides-sold:
+        sql: |-
+          INSERT INTO products_overrides_sold (id, product_name, set_name, brand_name, discriminator, rarity, quantity, value_total, value_per_unit, value_currency, paid_total, paid_per_unit, paid_currency, grade_type, grade_subtype, group_name, group_wishlist, tcgplayer_id, pricecharting_id, doubleholo_id, date_added, tag)
+          SELECT id, product_name, set_name, brand_name, discriminator, rarity, quantity, value_total, value_per_unit, value_currency, paid_total, paid_per_unit, paid_currency, grade_type, grade_subtype, group_name, group_wishlist, tcgplayer_id, pricecharting_id, doubleholo_id, date_added, tag FROM products WHERE id = :id
+          ON CONFLICT(id) DO NOTHING
+        write: true
+        on_success_redirect: /products/products_overrides_sold
     tables:
       products:
         permissions:
@@ -36,3 +43,11 @@ databases:
             id: root
           delete-row:
             id: root
+x-overrides-tables:
+- sold
+x-overrides-extra-columns:
+- date_sold
+- sold_quantity
+- sold_value_total
+- sold_value_per_unit
+- sold_remarks

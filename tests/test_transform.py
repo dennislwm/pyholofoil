@@ -271,7 +271,8 @@ def test_config_declared_override_column_appears_in_merged_view(tmp_path, monkey
     in products_merged, even though products itself has no such column."""
     monkeypatch.chdir(tmp_path)
     (tmp_path / "datasette.yaml").write_text(
-        "x-overrides-extra-columns:\n  - operator_notes\n"
+        "databases:\n  products:\n    tables:\n      products_overrides:\n"
+        "        x-overrides-extra-columns:\n        - operator_notes\n"
     )
     db_path = tmp_path / "products.db"
     json_path = tmp_path / "shiny.json"
@@ -303,12 +304,14 @@ def test_config_declared_columns_accumulate_across_runs(tmp_path, monkeypatch):
     json_path.write_text(json.dumps([{"id": "aaa", "product_name": "X"}]))
 
     (tmp_path / "datasette.yaml").write_text(
-        "x-overrides-extra-columns:\n  - field_one\n"
+        "databases:\n  products:\n    tables:\n      products_overrides:\n"
+        "        x-overrides-extra-columns:\n        - field_one\n"
     )
     load_products(str(json_path), str(db_path))
 
     (tmp_path / "datasette.yaml").write_text(
-        "x-overrides-extra-columns:\n  - field_one\n  - field_two\n"
+        "databases:\n  products:\n    tables:\n      products_overrides:\n"
+        "        x-overrides-extra-columns:\n        - field_one\n        - field_two\n"
     )
     load_products(str(json_path), str(db_path))
 
@@ -344,7 +347,8 @@ def test_config_declared_extra_column_defaults_existing_rows_to_empty_string(
     conn.close()
 
     (tmp_path / "datasette.yaml").write_text(
-        "x-overrides-extra-columns:\n  - sold_remarks\n"
+        "databases:\n  products:\n    tables:\n      products_overrides:\n"
+        "        x-overrides-extra-columns:\n        - sold_remarks\n"
     )
     load_products(str(json_path), str(db_path))
 
@@ -362,7 +366,8 @@ def test_ensure_overrides_extra_column_creation_is_idempotent(tmp_path, monkeypa
     transform run declaring the same config column must not error."""
     monkeypatch.chdir(tmp_path)
     (tmp_path / "datasette.yaml").write_text(
-        "x-overrides-extra-columns:\n  - operator_notes\n"
+        "databases:\n  products:\n    tables:\n      products_overrides:\n"
+        "        x-overrides-extra-columns:\n        - operator_notes\n"
     )
     db_path = tmp_path / "products.db"
     json_path = tmp_path / "shiny.json"
@@ -376,6 +381,35 @@ def test_ensure_overrides_extra_column_creation_is_idempotent(tmp_path, monkeypa
     conn.close()
 
     assert cols.count("operator_notes") == 1
+
+
+def test_extra_column_declared_for_one_table_does_not_leak_to_another(
+    tmp_path, monkeypatch
+):
+    """Per ADR-22: a column declared under one overrides table's own
+    x-overrides-extra-columns block must not appear on a different
+    overrides table -- the pre-ADR-22 flat top-level list applied every
+    declared column to every table, and this already corrupted the live
+    products_overrides table with sold-only columns."""
+    monkeypatch.chdir(tmp_path)
+    (tmp_path / "datasette.yaml").write_text(
+        "databases:\n  products:\n    tables:\n      products_overrides_sold:\n"
+        "        x-overrides-extra-columns:\n        - sold_remarks\n"
+        "x-overrides-tables:\n  - sold\n"
+    )
+    db_path = tmp_path / "products.db"
+    json_path = tmp_path / "shiny.json"
+    json_path.write_text(json.dumps([{"id": "aaa", "product_name": "X"}]))
+
+    load_products(str(json_path), str(db_path))
+
+    conn = sqlite3.connect(str(db_path))
+    primary_cols = {row[1] for row in conn.execute("PRAGMA table_info(products_overrides)")}
+    sold_cols = {row[1] for row in conn.execute("PRAGMA table_info(products_overrides_sold)")}
+    conn.close()
+
+    assert "sold_remarks" not in primary_cols
+    assert "sold_remarks" in sold_cols
 
 
 def test_extra_overrides_table_gets_independent_table_and_view(tmp_path, monkeypatch):

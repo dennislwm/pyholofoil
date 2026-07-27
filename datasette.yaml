@@ -43,11 +43,12 @@ databases:
             id: root
           delete-row:
             id: root
+      products_overrides_sold:
+        x-overrides-extra-columns:
+        - date_sold
+        - sold_quantity
+        - sold_value_total
+        - sold_value_per_unit
+        - sold_remarks
 x-overrides-tables:
 - sold
-x-overrides-extra-columns:
-- date_sold
-- sold_quantity
-- sold_value_total
-- sold_value_per_unit
-- sold_remarks

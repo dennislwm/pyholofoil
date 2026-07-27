@@ -57,17 +57,26 @@ def _check_schema(conn, expected_columns, db_path):
         )
 
 
-def _load_extra_override_columns(config_path="datasette.yaml"):
-    """Per ADR-10 (Option 4): override-only columns (present in
-    products_overrides but not products) are declared durably in
-    datasette.yaml, not inferred from a live database inspection --
+def _load_extra_override_columns(config_path="datasette.yaml", name=None):
+    """Per ADR-10 (Option 4) and ADR-22 (Option 1): override-only columns
+    (present in an overrides table but not products) are declared durably
+    in datasette.yaml, not inferred from a live database inspection --
     surviving a fresh checkout or a schema-recovery rebuild (ADR-08)
-    without relying on the operator's memory."""
+    without relying on the operator's memory.
+
+    Per ADR-22: scoped per table under Datasette's own
+    databases.<db>.tables.<table_name> config block -- the same shape
+    already used for products_overrides.permissions -- so a column
+    declared for one overrides table is never silently applied to
+    another. name=None mirrors _ensure_overrides()'s own convention: the
+    primary (unsuffixed) products_overrides table."""
     if not os.path.exists(config_path):
         return []
     with open(config_path) as f:
         config = _yaml.load(f) or {}
-    return config.get("x-overrides-extra-columns") or []
+    table = "products_overrides" if name is None else f"products_overrides_{name}"
+    tables = config.get("databases", {}).get("products", {}).get("tables", {})
+    return (tables.get(table) or {}).get("x-overrides-extra-columns") or []
 
 
 def _load_extra_overrides_tables(config_path="datasette.yaml"):
@@ -115,7 +124,7 @@ def _ensure_overrides(conn, columns, name=None):
 
     existing = {row[1] for row in conn.execute(f"PRAGMA table_info({table})")}
     extra_cols = [
-        c for c in _load_extra_override_columns() if c not in override_cols
+        c for c in _load_extra_override_columns(name=name) if c not in override_cols
     ]
     for c in extra_cols:
         if c not in existing:

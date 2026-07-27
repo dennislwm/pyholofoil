@@ -44,7 +44,7 @@ explore:
 	pipenv run datasette $(DB_PATH) -c datasette.yaml --root
 
 sync-sheets:
-	pipenv run python -m app.sync_sheets --db-path $(DB_PATH) --spreadsheet-id $(SPREADSHEET_ID)
+	pipenv run python -m app.sync_sheets --db-path $(DB_PATH) --source-table $(SOURCE_TABLE) --spreadsheet-id $(SPREADSHEET_ID)
 
 deploy:
 	pipenv run python -m app.build --verify-only --redacted-db-path $(REDACTED_DB_PATH)

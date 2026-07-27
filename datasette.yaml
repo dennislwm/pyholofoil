@@ -27,6 +27,16 @@ databases:
           ON CONFLICT(id) DO NOTHING
         write: true
         on_success_redirect: /products/products_overrides_sold
+      backfill-null-extra-columns-sold:
+        sql: |-
+          UPDATE products_overrides_sold SET
+            date_sold = COALESCE(date_sold, ''),
+            sold_quantity = COALESCE(sold_quantity, ''),
+            sold_value_total = COALESCE(sold_value_total, ''),
+            sold_value_per_unit = COALESCE(sold_value_per_unit, ''),
+            sold_remarks = COALESCE(sold_remarks, '')
+        write: true
+        on_success_redirect: /products/products_overrides_sold
     tables:
       products:
         permissions:

@@ -13,7 +13,7 @@ jobs:
         run: make test
       - name: Build redacted artifact
         run: make build
-      - name: Deploy to Vercel
+      - name: Publish static copy
         run: make deploy
       - name: Sync live artifact to Google Sheets
         env:

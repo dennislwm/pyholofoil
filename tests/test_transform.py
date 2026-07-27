@@ -340,6 +340,185 @@ def test_ensure_overrides_extra_column_creation_is_idempotent(tmp_path, monkeypa
     assert cols.count("operator_notes") == 1
 
 
+def test_extra_overrides_table_gets_independent_table_and_view(tmp_path, monkeypatch):
+    """Per ADR-20: a table declared in x-overrides-tables gets its own
+    products_overrides_<name> table and products_merged_<name> view,
+    independent of the primary (unsuffixed) pair."""
+    monkeypatch.chdir(tmp_path)
+    (tmp_path / "datasette.yaml").write_text("x-overrides-tables:\n  - reviewer_b\n")
+    db_path = tmp_path / "products.db"
+    json_path = tmp_path / "shiny.json"
+    json_path.write_text(json.dumps([{"id": "aaa", "product_name": "X"}]))
+
+    load_products(str(json_path), str(db_path))
+
+    conn = sqlite3.connect(str(db_path))
+    conn.execute(
+        "INSERT INTO products_overrides_reviewer_b (id, product_name) VALUES (?, ?)",
+        ("aaa", "Corrected by reviewer B"),
+    )
+    conn.commit()
+    row = conn.execute(
+        "SELECT product_name FROM products_merged_reviewer_b WHERE id = ?", ("aaa",)
+    ).fetchone()
+    primary_row = conn.execute(
+        "SELECT product_name FROM products_merged WHERE id = ?", ("aaa",)
+    ).fetchone()
+    conn.close()
+
+    assert row == ("Corrected by reviewer B",)
+    assert primary_row == ("X",)  # primary table untouched by the extra one
+
+
+def test_extra_overrides_table_creation_is_idempotent(tmp_path, monkeypatch):
+    """A second transform run declaring the same extra overrides table
+    must not error, duplicate the table, or otherwise corrupt it -- same
+    guarantee the primary table already has, extended to a declared
+    extra one."""
+    monkeypatch.chdir(tmp_path)
+    (tmp_path / "datasette.yaml").write_text("x-overrides-tables:\n  - reviewer_b\n")
+    db_path = tmp_path / "products.db"
+    json_path = tmp_path / "shiny.json"
+    json_path.write_text(json.dumps([{"id": "aaa", "product_name": "X"}]))
+
+    load_products(str(json_path), str(db_path))
+    load_products(str(json_path), str(db_path))
+
+    conn = sqlite3.connect(str(db_path))
+    names = [
+        row[0]
+        for row in conn.execute(
+            "SELECT name FROM sqlite_master WHERE type IN ('table', 'view') "
+            "AND name IN ('products_overrides_reviewer_b', 'products_merged_reviewer_b')"
+        )
+    ]
+    conn.close()
+
+    assert sorted(names) == ["products_merged_reviewer_b", "products_overrides_reviewer_b"]
+
+
+def test_primary_overrides_table_names_unchanged_when_extra_tables_declared(
+    tmp_path, monkeypatch
+):
+    """Per ADR-20: declaring extra overrides tables must never rename or
+    otherwise affect the primary products_overrides/products_merged pair
+    -- build.py/sync_sheets.py/Makefile default to the literal
+    'products_merged' name and must keep working unmodified."""
+    monkeypatch.chdir(tmp_path)
+    (tmp_path / "datasette.yaml").write_text("x-overrides-tables:\n  - reviewer_b\n")
+    db_path = tmp_path / "products.db"
+    json_path = tmp_path / "shiny.json"
+    json_path.write_text(json.dumps([{"id": "aaa", "product_name": "X"}]))
+
+    load_products(str(json_path), str(db_path))
+
+    conn = sqlite3.connect(str(db_path))
+    tables = {
+        row[0]
+        for row in conn.execute(
+            "SELECT name FROM sqlite_master WHERE type IN ('table', 'view')"
+        )
+    }
+    conn.close()
+
+    assert {"products_overrides", "products_merged"}.issubset(tables)
+
+
+def test_generate_overrides_queries_preserves_hand_authored_content(
+    tmp_path, monkeypatch
+):
+    """Per ADR-20: the generator mutates the parsed config structurally via
+    ruamel.yaml's round-trip mode, never a plain yaml.safe_load()+dump()
+    (confirmed live: that round-trip strips every comment and reorders
+    keys in the real datasette.yaml). A hand-written comment and the
+    existing copy-to-overrides query must both survive generation
+    untouched, and the new entry must appear alongside them."""
+    monkeypatch.chdir(tmp_path)
+    (tmp_path / "datasette.yaml").write_text(
+        "databases:\n"
+        "  products:\n"
+        "    queries:\n"
+        "      copy-to-overrides:  # hand-authored, never touched\n"
+        "        sql: |-\n"
+        "          INSERT INTO products_overrides (id) SELECT id FROM products WHERE id = :id\n"
+        "        write: true\n"
+        "x-overrides-tables:\n"
+        "  - reviewer_b\n"
+    )
+    db_path = tmp_path / "products.db"
+    json_path = tmp_path / "shiny.json"
+    json_path.write_text(json.dumps([{"id": "aaa", "product_name": "X"}]))
+
+    load_products(str(json_path), str(db_path))
+
+    out = (tmp_path / "datasette.yaml").read_text()
+
+    assert "# hand-authored, never touched" in out
+    assert "copy-to-overrides:" in out
+    assert "copy-to-overrides-reviewer_b:" in out
+    assert "products_overrides_reviewer_b" in out
+    assert "on_success_redirect: /products/products_overrides_reviewer_b" in out
+
+
+def test_generate_overrides_queries_is_idempotent(tmp_path, monkeypatch):
+    """Running load_products twice with the same declared tables must not
+    duplicate the generated canned-query entry."""
+    monkeypatch.chdir(tmp_path)
+    (tmp_path / "datasette.yaml").write_text(
+        "databases:\n  products:\n    queries: {}\n"
+        "x-overrides-tables:\n  - reviewer_b\n"
+    )
+    db_path = tmp_path / "products.db"
+    json_path = tmp_path / "shiny.json"
+    json_path.write_text(json.dumps([{"id": "aaa", "product_name": "X"}]))
+
+    load_products(str(json_path), str(db_path))
+    first = (tmp_path / "datasette.yaml").read_text()
+    load_products(str(json_path), str(db_path))
+    second = (tmp_path / "datasette.yaml").read_text()
+
+    assert first == second
+    assert second.count("copy-to-overrides-reviewer_b:") == 1
+
+
+def test_generate_overrides_queries_removes_undeclared_entries(tmp_path, monkeypatch):
+    """If a previously-declared table is removed from x-overrides-tables,
+    its generated canned query must be removed too, not left behind
+    pointing at a table that may no longer exist."""
+    monkeypatch.chdir(tmp_path)
+    yaml_path = tmp_path / "datasette.yaml"
+    yaml_path.write_text(
+        "databases:\n  products:\n    queries: {}\n"
+        "x-overrides-tables:\n  - reviewer_b\n"
+    )
+    db_path = tmp_path / "products.db"
+    json_path = tmp_path / "shiny.json"
+    json_path.write_text(json.dumps([{"id": "aaa", "product_name": "X"}]))
+
+    load_products(str(json_path), str(db_path))
+    assert "copy-to-overrides-reviewer_b:" in yaml_path.read_text()
+
+    yaml_path.write_text("databases:\n  products:\n    queries: {}\n")
+    load_products(str(json_path), str(db_path))
+
+    assert "copy-to-overrides-reviewer_b:" not in yaml_path.read_text()
+
+
+def test_generate_overrides_queries_noop_without_queries_section(tmp_path, monkeypatch):
+    """A datasette.yaml with no databases.products.queries section (e.g. a
+    fresh checkout predating ADR-20) must not error and must not invent
+    the section."""
+    monkeypatch.chdir(tmp_path)
+    (tmp_path / "datasette.yaml").write_text("x-overrides-tables:\n  - reviewer_b\n")
+    db_path = tmp_path / "products.db"
+    json_path = tmp_path / "shiny.json"
+    json_path.write_text(json.dumps([{"id": "aaa", "product_name": "X"}]))
+
+    load_products(str(json_path), str(db_path))  # must not raise
+
+    assert "copy-to-overrides-reviewer_b" not in (tmp_path / "datasette.yaml").read_text()
+
+
 def test_load_products_refuses_record_missing_id(tmp_path, monkeypatch):
     """Per ADR-15: a record missing a field records[0] had (e.g. a
     ShinyExport export-format drift dropping "id") must fail loudly, not

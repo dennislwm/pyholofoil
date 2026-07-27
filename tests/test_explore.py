@@ -2,8 +2,8 @@ import json
 import re
 import sqlite3
 
-import yaml
 from datasette_saved_queries import create_tables
+from ruamel.yaml import YAML
 
 from app.transform import load_products
 
@@ -71,7 +71,7 @@ def test_copy_to_overrides_column_list_matches_products_overrides_schema(tmp_pat
     conn.close()
 
     with open("datasette.yaml") as f:
-        config = yaml.safe_load(f)
+        config = YAML().load(f)
     sql = config["databases"]["products"]["queries"]["copy-to-overrides"]["sql"]
 
     def _columns(pattern):

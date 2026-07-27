@@ -6,7 +6,10 @@ import sqlite3
 from datetime import datetime, timezone
 
 import jsonschema
-import yaml
+from ruamel.yaml import YAML
+from ruamel.yaml.scalarstring import LiteralScalarString
+
+_yaml = YAML()
 
 
 def _validate_records(records, schema_path="input_schema.json"):
@@ -63,11 +66,24 @@ def _load_extra_override_columns(config_path="datasette.yaml"):
     if not os.path.exists(config_path):
         return []
     with open(config_path) as f:
-        config = yaml.safe_load(f) or {}
+        config = _yaml.load(f) or {}
     return config.get("x-overrides-extra-columns") or []
 
 
-def _ensure_overrides(conn, columns):
+def _load_extra_overrides_tables(config_path="datasette.yaml"):
+    """Per ADR-20 (Option 2): names of ADDITIONAL overrides tables beyond
+    the implicit primary one. Primary stays products_overrides/
+    products_merged, completely unchanged -- no rename, no migration, no
+    default name to invent. Empty list means zero behavior change from
+    before this ADR."""
+    if not os.path.exists(config_path):
+        return []
+    with open(config_path) as f:
+        config = _yaml.load(f) or {}
+    return config.get("x-overrides-tables") or []
+
+
+def _ensure_overrides(conn, columns, name=None):
     """Per ADR-09 (Policy C): products_overrides mirrors products' input
     columns (not last_updated, which is transform-internal bookkeeping),
     all nullable except id. transform never writes to this table --
@@ -80,21 +96,30 @@ def _ensure_overrides(conn, columns):
     TABLE ADD COLUMN has no IF NOT EXISTS, so each declared column still
     needs one existence check before being added, same primitive as
     _check_schema (ADR-08); what changes is WHICH columns get checked, a
-    config-declared list instead of a diff against `columns`."""
+    config-declared list instead of a diff against `columns`.
+
+    Per ADR-20: `name=None` is the primary table (today's exact
+    unsuffixed products_overrides/products_merged); any other value
+    produces products_overrides_<name>/products_merged_<name>, so
+    build.py/sync_sheets.py/Makefile's products_merged default never
+    needs to change."""
+    table = "products_overrides" if name is None else f"products_overrides_{name}"
+    view = "products_merged" if name is None else f"products_merged_{name}"
+
     override_cols = [c for c in columns if c != "last_updated"]
     conn.execute(
-        "CREATE TABLE IF NOT EXISTS products_overrides "
+        f"CREATE TABLE IF NOT EXISTS {table} "
         f"({', '.join(f'{c} TEXT' for c in override_cols)}, "
         "PRIMARY KEY (id))"
     )
 
-    existing = {row[1] for row in conn.execute("PRAGMA table_info(products_overrides)")}
+    existing = {row[1] for row in conn.execute(f"PRAGMA table_info({table})")}
     extra_cols = [
         c for c in _load_extra_override_columns() if c not in override_cols
     ]
     for c in extra_cols:
         if c not in existing:
-            conn.execute(f"ALTER TABLE products_overrides ADD COLUMN {c} TEXT")
+            conn.execute(f"ALTER TABLE {table} ADD COLUMN {c} TEXT")
 
     all_override_cols = override_cols + extra_cols
     merge_cols = ", ".join(
@@ -103,12 +128,57 @@ def _ensure_overrides(conn, columns):
         else f"o.{c}"
         for c in all_override_cols
     )
-    conn.execute("DROP VIEW IF EXISTS products_merged")
+    conn.execute(f"DROP VIEW IF EXISTS {view}")
     conn.execute(
-        "CREATE VIEW products_merged AS "
+        f"CREATE VIEW {view} AS "
         f"SELECT {merge_cols}, p.last_updated FROM products p "
-        "LEFT JOIN products_overrides o ON p.id = o.id"
+        f"LEFT JOIN {table} o ON p.id = o.id"
     )
+
+
+def _generate_overrides_queries(columns, config_path="datasette.yaml"):
+    """Per ADR-20 (Option 2): writes one canned write-query per declared
+    extra overrides table into datasette.yaml, via ruamel.yaml's
+    round-trip mode -- structural mutation of the parsed config, not a
+    plain-text marker splice. ruamel preserves every comment, key order,
+    and the hand-authored `copy-to-overrides` query's block-scalar
+    formatting untouched (confirmed live against this file); plain
+    PyYAML's safe_load()+dump() strips all of that (also confirmed
+    live). Generated entries are identified by the `copy-to-overrides-`
+    prefix (the primary key `copy-to-overrides` itself never matches) --
+    any such key not in the current declared-names list is removed each
+    run, so renaming/removing a declared table cleans up after itself,
+    not just adding new ones."""
+    names = _load_extra_overrides_tables(config_path)
+    override_cols = [c for c in columns if c != "last_updated"]
+    col_csv = ", ".join(override_cols)
+
+    if not os.path.exists(config_path):
+        return
+    with open(config_path) as f:
+        config = _yaml.load(f) or {}
+
+    queries = config.get("databases", {}).get("products", {}).get("queries")
+    if queries is None:
+        return  # no queries section to generate into -- nothing to do
+
+    for key in [k for k in queries if k.startswith("copy-to-overrides-")]:
+        if key[len("copy-to-overrides-"):] not in names:
+            del queries[key]
+
+    for name in names:
+        queries[f"copy-to-overrides-{name}"] = {
+            "sql": LiteralScalarString(
+                f"INSERT INTO products_overrides_{name} ({col_csv})\n"
+                f"SELECT {col_csv} FROM products WHERE id = :id\n"
+                "ON CONFLICT(id) DO NOTHING"
+            ),
+            "write": True,
+            "on_success_redirect": f"/products/products_overrides_{name}",
+        }
+
+    with open(config_path, "w") as f:
+        _yaml.dump(config, f)
 
 
 def load_products(input_path, db_path):
@@ -147,6 +217,9 @@ def load_products(input_path, db_path):
         [tuple(r.get(c) for c in columns[:-1]) + (now,) for r in records],
     )
     _ensure_overrides(conn, columns)
+    for name in _load_extra_overrides_tables():
+        _ensure_overrides(conn, columns, name)
+    _generate_overrides_queries(columns)
     conn.commit()
     conn.close()
 

@@ -9,6 +9,19 @@ One-time steps so `deploy.yml` actually has somewhere to run and somewhere to pu
 1. **Register a self-hosted runner** → repo Settings → Actions → Runners → New self-hosted runner → pick macOS + your architecture → run the provided `./config.sh` (one-time, time-limited registration token) then `./run.sh`, kept running. `deploy.yml` targets `runs-on: [self-hosted, macOS]`; without this, every push to `main` queues a job with nothing to run it.
 2. **Enable GitHub Pages via Actions** → repo Settings → Pages → Source → **GitHub Actions** (not "Deploy from a branch"). `deploy.yml` publishes `docs/products_public.db` via `actions/upload-pages-artifact` + `actions/deploy-pages`; `docs/` is gitignored and never committed, so the branch-serving option has nothing to find.
 
+## Usage: declaring an extra overrides table ([ADR-20](../13pyholofoil.wiki/decisions/adr-20-multiple-overrides-tables.md))
+
+Not a one-time setup step -- repeat this whenever you want another independent correction set against `products`, e.g. a second reviewer.
+
+1. Add the table's name to `datasette.yaml`'s `x-overrides-tables` list (create the key if it doesn't exist yet):
+   ```yaml
+   x-overrides-tables:
+     - reviewer_b
+   ```
+2. Run `make transform` (or `python -m app.transform`). This creates `products_overrides_reviewer_b` and `products_merged_reviewer_b`, and generates a `copy-to-overrides-reviewer_b` canned write-query in `datasette.yaml` -- gives that table the same one-click "copy from products" convenience the primary table has, via `make explore`'s write-UI.
+3. If `explore` is already running, restart it -- `datasette.yaml` is only read at Datasette startup.
+4. To remove a declared table, delete its entry from `x-overrides-tables` and run `make transform` again -- the generated canned query is cleaned up automatically. **The underlying `products_overrides_<name>`/`products_merged_<name>` table and view are NOT dropped** -- only the canned query goes away. Undeclaring a table never destroys its data; re-declaring the same name later picks the existing table back up.
+
 ## Setup: Google Sheets sync ([ADR-14](../13pyholofoil.wiki/decisions/adr-14-live-artifact-remote-access.md))
 
 One-time steps to let the CI workflow push the live artifact to a Google Sheet.

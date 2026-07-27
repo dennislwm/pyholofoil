@@ -29,6 +29,19 @@ Not a one-time setup step -- repeat this whenever you want another independent c
 3. If `explore` is already running, restart it -- `datasette.yaml` is only read at Datasette startup.
 4. To remove a declared table, delete its entry from `x-overrides-tables` and run `make transform` again -- the generated canned query is cleaned up automatically. **The underlying `products_overrides_<name>`/`products_merged_<name>` table and view are NOT dropped** -- only the canned query goes away. Undeclaring a table never destroys its data; re-declaring the same name later picks the existing table back up.
 
+## Usage: declaring an extra override-only column ([ADR-10](../13pyholofoil.wiki/decisions/adr-10-overrides-view-schema-sync.md))
+
+Not a one-time setup step -- repeat whenever a correction needs a field `products` doesn't have (e.g. `sold_remarks`).
+
+1. Add the column's name to `datasette.yaml`'s `x-overrides-extra-columns` list (create the key if it doesn't exist yet):
+   ```yaml
+   x-overrides-extra-columns:
+     - sold_remarks
+   ```
+2. Run `make transform` (or `python -m app.transform`). This adds the column to `products_overrides` (and every declared extra table, ADR-20) via `ALTER TABLE`, defaulting existing rows to `''` (not `NULL` -- `datasette-write-ui`'s edit form errors on a `NULL`-valued field), and rebuilds `products_merged` to include it.
+3. If `explore` is already running, restart it -- `datasette.yaml` is only read at Datasette startup.
+4. Adding a column via `datasette-edit-schema`'s own schema-editing UI instead of this config list works too, but existing rows are left `NULL` (no default-value option in that UI) -- backfill them yourself (`UPDATE <table> SET <col> = '' WHERE <col> IS NULL`) before editing any row through the write-UI, or the same `NULL`-crashes-the-edit-form error applies. Prefer this config-declared route: it survives a schema-recovery rebuild (ADR-08) and a fresh checkout; an ad hoc UI-added column doesn't.
+
 ## Setup: Google Sheets sync ([ADR-14](../13pyholofoil.wiki/decisions/adr-14-live-artifact-remote-access.md))
 
 One-time steps to let the CI workflow push the live artifact to a Google Sheet.

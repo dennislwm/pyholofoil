@@ -319,6 +319,44 @@ def test_config_declared_columns_accumulate_across_runs(tmp_path, monkeypatch):
     assert {"field_one", "field_two"}.issubset(cols)
 
 
+def test_config_declared_extra_column_defaults_existing_rows_to_empty_string(
+    tmp_path, monkeypatch
+):
+    """A column declared in x-overrides-extra-columns after a row already
+    exists in products_overrides must default that existing row's new
+    column to '' (empty string), not SQLite's own NULL default --
+    datasette-write-ui's edit-row form errors ("Unsupported type NoneType")
+    on any NULL-valued field, so a NULL here would silently break editing
+    every pre-existing row the moment the column is declared."""
+    monkeypatch.chdir(tmp_path)
+    db_path = tmp_path / "products.db"
+    json_path = tmp_path / "shiny.json"
+    json_path.write_text(json.dumps([{"id": "aaa", "product_name": "X"}]))
+
+    (tmp_path / "datasette.yaml").write_text("")
+    load_products(str(json_path), str(db_path))
+
+    conn = sqlite3.connect(str(db_path))
+    conn.execute(
+        "INSERT INTO products_overrides (id) VALUES (?)", ("bbb",)
+    )
+    conn.commit()
+    conn.close()
+
+    (tmp_path / "datasette.yaml").write_text(
+        "x-overrides-extra-columns:\n  - sold_remarks\n"
+    )
+    load_products(str(json_path), str(db_path))
+
+    conn = sqlite3.connect(str(db_path))
+    row = conn.execute(
+        "SELECT sold_remarks FROM products_overrides WHERE id = ?", ("bbb",)
+    ).fetchone()
+    conn.close()
+
+    assert row == ("",)
+
+
 def test_ensure_overrides_extra_column_creation_is_idempotent(tmp_path, monkeypatch):
     """SQLite's ALTER TABLE ADD COLUMN has no IF NOT EXISTS -- a second
     transform run declaring the same config column must not error."""

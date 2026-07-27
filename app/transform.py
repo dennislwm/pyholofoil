@@ -119,7 +119,7 @@ def _ensure_overrides(conn, columns, name=None):
     ]
     for c in extra_cols:
         if c not in existing:
-            conn.execute(f"ALTER TABLE {table} ADD COLUMN {c} TEXT")
+            conn.execute(f"ALTER TABLE {table} ADD COLUMN {c} TEXT DEFAULT ''")
 
     all_override_cols = override_cols + extra_cols
     merge_cols = ", ".join(

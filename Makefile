@@ -11,7 +11,7 @@ help:
 	@echo "  check-pins Fail if any Pipfile package is unpinned (bare \"*\")"
 	@echo "  transform  Load a ShinyExport JSON or CSV snapshot into data/products.db (default: the single file in input/, or INPUT_PATH=path/to.json|csv)"
 	@echo "  build      Materialize data/products_public.db, redacted per sensitive_fields.json (ADR-04)"
-	@echo "  deploy     Verify REDACTED_DB_PATH excludes every sensitive_fields.json column (REQ-013), then copy it into DOCS_DIR (default docs/) for GitHub Pages to serve as a static file -- view it via datasette-lite (ADR-16): https://lite.datasette.io/?url=https://$(GH_PAGES_HOST)/products_public.db"
+	@echo "  deploy     Verify REDACTED_DB_PATH excludes every sensitive_fields.json column (REQ-013), then copy it into DOCS_DIR (default docs/) for CI to upload as a GitHub Pages artifact (ADR-17) -- view it via datasette-lite (ADR-16): https://lite.datasette.io/?url=https://$(GH_PAGES_HOST)/products_public.db"
 	@echo "  explore    Open the transformed SQLite file in Datasette (default data/products.db, override with DB_PATH=path/to.db). Prints a --root URL: visit it to get write access to products_overrides (ADR-09); products itself stays read-only."
 	@echo "  sync-sheets  Push products_merged (full data, including sensitive fields -- this is the live artifact, not the redacted one) to a Google Sheet via gws (ADR-14). Requires SPREADSHEET_ID, GOOGLE_WORKSPACE_CLI_CREDENTIALS_FILE (service account key path), and GOOGLE_WORKSPACE_PROJECT_ID (quota/billing project -- may differ from the key file's own project). The Sheet's own sharing settings control who can view it -- same as any personal Google Sheet, not automatically public."
 	@echo ""
@@ -50,4 +50,4 @@ deploy:
 	pipenv run python -m app.build --verify-only --redacted-db-path $(REDACTED_DB_PATH)
 	pipenv run python -m app.build --publish-static --redacted-db-path $(REDACTED_DB_PATH) --docs-dir $(DOCS_DIR)
 	@echo "View at: https://lite.datasette.io/?url=https://$(GH_PAGES_HOST)/products_public.db"
-	@echo "(one-time setup: enable GitHub Pages on this repo, serving from /docs on the default branch)"
+	@echo "(one-time setup: in repo Settings > Pages, set Source to \"GitHub Actions\" -- ADR-17)"

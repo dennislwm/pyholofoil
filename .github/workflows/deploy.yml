@@ -4,9 +4,16 @@ on:
   push:
     branches: [main]
 
+permissions:
+  pages: write
+  id-token: write
+
 jobs:
   deploy:
     runs-on: [self-hosted, macOS]
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
     steps:
       - uses: actions/checkout@v4
       - name: Run test suite
@@ -15,6 +22,13 @@ jobs:
         run: make build
       - name: Publish static copy
         run: make deploy
+      - name: Upload Pages artifact
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: docs
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4
       - name: Sync live artifact to Google Sheets
         env:
           GOOGLE_WORKSPACE_CLI_CREDENTIALS_FILE: ${{ vars.GOOGLE_WORKSPACE_CLI_CREDENTIALS_FILE }}

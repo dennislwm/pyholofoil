@@ -2,6 +2,13 @@
 
 Trading-card asset data pipeline. See [pyholofoil.wiki](../13pyholofoil.wiki) for requirements and decisions.
 
+## Setup: CI deploy pipeline ([ADR-13](../13pyholofoil.wiki/decisions/adr-13-deploy-cadence-mechanism.md), [ADR-16](../13pyholofoil.wiki/decisions/adr-16-public-copy-truly-static.md), [ADR-17](../13pyholofoil.wiki/decisions/adr-17-static-artifact-reaches-pages.md))
+
+One-time steps so `deploy.yml` actually has somewhere to run and somewhere to publish.
+
+1. **Register a self-hosted runner** → repo Settings → Actions → Runners → New self-hosted runner → pick macOS + your architecture → run the provided `./config.sh` (one-time, time-limited registration token) then `./run.sh`, kept running. `deploy.yml` targets `runs-on: [self-hosted, macOS]`; without this, every push to `main` queues a job with nothing to run it.
+2. **Enable GitHub Pages via Actions** → repo Settings → Pages → Source → **GitHub Actions** (not "Deploy from a branch"). `deploy.yml` publishes `docs/products_public.db` via `actions/upload-pages-artifact` + `actions/deploy-pages`; `docs/` is gitignored and never committed, so the branch-serving option has nothing to find.
+
 ## Setup: Google Sheets sync ([ADR-14](../13pyholofoil.wiki/decisions/adr-14-live-artifact-remote-access.md))
 
 One-time steps to let the CI workflow push the live artifact to a Google Sheet.

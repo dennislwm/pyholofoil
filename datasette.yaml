@@ -28,3 +28,11 @@ databases:
           delete-row: false
           alter-table: false
           drop-table: false
+      products_overrides:
+        permissions:
+          insert-row:
+            id: root
+          update-row:
+            id: root
+          delete-row:
+            id: root

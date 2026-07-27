@@ -9,6 +9,13 @@ One-time steps so `deploy.yml` actually has somewhere to run and somewhere to pu
 1. **Register a self-hosted runner** → repo Settings → Actions → Runners → New self-hosted runner → pick macOS + your architecture → run the provided `./config.sh` (one-time, time-limited registration token) then `./run.sh`, kept running. `deploy.yml` targets `runs-on: [self-hosted, macOS]`; without this, every push to `main` queues a job with nothing to run it.
 2. **Enable GitHub Pages via Actions** → repo Settings → Pages → Source → **GitHub Actions** (not "Deploy from a branch"). `deploy.yml` publishes `docs/products_public.db` via `actions/upload-pages-artifact` + `actions/deploy-pages`; `docs/` is gitignored and never committed, so the branch-serving option has nothing to find.
 
+## Usage: correcting a data error ([ADR-09](../13pyholofoil.wiki/decisions/adr-09-explore-stage-write-capability.md), REQ-010)
+
+1. Run `make explore`. Datasette prints a one-time root login URL in the terminal (the `--root` flag) -- open it in your browser once per session. Without this you're browsing anonymously: `products` is explicitly locked read-only in `datasette.yaml`, and `products_overrides` has no permission grant for anonymous actors, so the write-UI's Edit/Insert buttons won't work.
+2. Open the `copy-to-overrides` canned query (Queries page) and submit the product's `id`. This copies that row into `products_overrides`, all columns NULL except what was copied -- `products` itself is never written to.
+3. You're redirected to `products_overrides` -- click **Edit** on the copied row (via `datasette-write-ui`) and correct the fields you need. The correction persists across future `transform` re-runs.
+4. `SOURCE_TABLE` (Makefile variable, default `products_merged`) is what `build` and `sync-sheets` both read from, so a correction in `products_overrides` flows through automatically to `make build`'s public artifact and `make sync-sheets`'s Sheet push. Override it (e.g. `make build SOURCE_TABLE=products_merged_reviewer_b`) to source from a declared extra overrides table (ADR-20) instead of the primary one.
+
 ## Usage: declaring an extra overrides table ([ADR-20](../13pyholofoil.wiki/decisions/adr-20-multiple-overrides-tables.md))
 
 Not a one-time setup step -- repeat this whenever you want another independent correction set against `products`, e.g. a second reviewer.

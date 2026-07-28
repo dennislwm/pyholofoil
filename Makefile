@@ -41,7 +41,7 @@ build:
 	pipenv run python -m app.build --source-table $(SOURCE_TABLE)
 
 explore:
-	pipenv run datasette $(DB_PATH) -c datasette.yaml --root --plugins-dir=plugins/ -o
+	pipenv run datasette $(DB_PATH) -c datasette.yaml --secret $(DATASETTE_SECRET) --plugins-dir=plugins/ -o
 
 sync-sheets:
 	pipenv run python -m app.sync_sheets --db-path $(DB_PATH) --source-table $(SOURCE_TABLE) --spreadsheet-id $(SPREADSHEET_ID)

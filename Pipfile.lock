@@ -1,7 +1,7 @@
 {
     "_meta": {
         "hash": {
-            "sha256": "ce3c0be66b4cb4b5ba39a3ac75b128b637f13af7a355d818a104fb3aebdba825"
+            "sha256": "53c8004aac8ae169ba4cad9493759371f3f048c1776009aa5ad25f8e3c8654c2"
         },
         "pipfile-spec": 6,
         "requires": {
@@ -96,6 +96,14 @@
             "index": "pypi",
             "markers": "python_version >= '3.8'",
             "version": "==1.0a19"
+        },
+        "datasette-auth-passwords": {
+            "hashes": [
+                "sha256:403a53cb6a29617e91ea3de212dd54e7270c2bdb3e9e8dba350d540e1c5adfca",
+                "sha256:95a933214fbd8ad1218d11bc37a17e074c66141e593ce202cf0f45cd3562c734"
+            ],
+            "index": "pypi",
+            "version": "==1.1.1"
         },
         "datasette-create-view": {
             "hashes": [

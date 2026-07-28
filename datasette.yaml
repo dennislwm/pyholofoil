@@ -48,19 +48,19 @@ databases:
       products_overrides:
         permissions:
           insert-row:
-            id: root
+            id: operator
           update-row:
-            id: root
+            id: operator
           delete-row:
-            id: root
+            id: operator
       products_overrides_sold:
         permissions:
           insert-row:
-            id: root
+            id: operator
           update-row:
-            id: root
+            id: operator
           delete-row:
-            id: root
+            id: operator
         x-overrides-extra-columns:
         - date_sold
         - sold_quantity
@@ -69,3 +69,7 @@ databases:
         - sold_remarks
 x-overrides-tables:
 - sold
+plugins:
+  datasette-auth-passwords:
+    operator_password_hash:
+      $env: DATASETTE_OPERATOR_PASSWORD_HASH

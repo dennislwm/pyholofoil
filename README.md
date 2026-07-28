@@ -17,9 +17,21 @@ One-time steps so `deploy.yml` actually has somewhere to run and somewhere to pu
 2. Run `make build`. `build_redacted()` excludes every listed column from the redacted artifact; `verify_redacted()` then re-checks the result and fails loudly if any of them are still present, catching a stale or misconfigured artifact before it can reach `make deploy`.
 3. An empty list (the default) excludes nothing -- every column, including cost/pricing data, ships to the public copy verbatim until you populate this file.
 
-## Usage: correcting a data error ([ADR-09](../13pyholofoil.wiki/decisions/adr-09-explore-stage-write-capability.md), REQ-010)
+## Setup: operator login ([ADR-26](../13pyholofoil.wiki/decisions/adr-26-root-bypasses-products-readonly-lock.md))
 
-1. Run `make explore`. Datasette prints a one-time root login URL in the terminal (the `--root` flag) -- open it in your browser once per session. Without this you're browsing anonymously: `products` is explicitly locked read-only in `datasette.yaml`, and `products_overrides` has no permission grant for anonymous actors, so the write-UI's Edit/Insert buttons won't work.
+One-time steps so `make explore` has a real, scoped `operator` identity instead of Datasette's unrestricted `root` superuser -- `root` bypasses every write permission unconditionally, so `products`'s read-only lock was never actually enforced against it.
+
+1. **Generate a password hash**: `pipenv run datasette hash-password` (interactive) or `echo 'your password' | pipenv run datasette hash-password --no-confirm`.
+2. **Generate a Datasette secret**: any random string, e.g. `python3 -c "import secrets; print(secrets.token_hex(32))"`.
+3. **Store both, one command** (same `pyholofoil/env` note the Google Sheets setup already uses):
+   ```bash
+   echo -e "DATASETTE_SECRET=<value from step 2>\nDATASETTE_OPERATOR_PASSWORD_HASH=<value from step 1>" | lpass add --non-interactive --notes "pyholofoil/env"
+   ```
+4. **Run once per new terminal**: `source make.sh && load_datasette_env` -- exports both as env vars for `make explore` to read.
+
+## Usage: correcting a data error ([ADR-09](../13pyholofoil.wiki/decisions/adr-09-explore-stage-write-capability.md), REQ-010, [ADR-26](../13pyholofoil.wiki/decisions/adr-26-root-bypasses-products-readonly-lock.md))
+
+1. Run `make explore` (after the one-time Setup above). It opens a login page in your browser -- log in as `operator` with the password from Setup step 1. Without this you're browsing anonymously: `products` is explicitly locked read-only in `datasette.yaml`, and `products_overrides` only grants write access to `operator`, so the write-UI's Edit/Insert buttons won't work.
 2. Open the `copy-to-overrides` canned query (Queries page) and submit the product's `id`. This copies that row into `products_overrides`, all columns NULL except what was copied -- `products` itself is never written to.
 3. You're redirected to `products_overrides` -- click **Edit** on the copied row (via `datasette-write-ui`) and correct the fields you need. The correction persists across future `transform` re-runs.
 4. `SOURCE_TABLE` (Makefile variable, default `products_merged`) is what `build` and `sync-sheets` both read from, so a correction in `products_overrides` flows through automatically to `make build`'s public artifact and `make sync-sheets`'s Sheet push. Override it (e.g. `make build SOURCE_TABLE=products_merged_reviewer_b`) to source from a declared extra overrides table (ADR-20) instead of the primary one.

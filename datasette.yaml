@@ -54,6 +54,13 @@ databases:
           delete-row:
             id: root
       products_overrides_sold:
+        permissions:
+          insert-row:
+            id: root
+          update-row:
+            id: root
+          delete-row:
+            id: root
         x-overrides-extra-columns:
         - date_sold
         - sold_quantity

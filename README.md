@@ -9,6 +9,14 @@ One-time steps so `deploy.yml` actually has somewhere to run and somewhere to pu
 1. **Register a self-hosted runner** → repo Settings → Actions → Runners → New self-hosted runner → pick macOS + your architecture → run the provided `./config.sh` (one-time, time-limited registration token) then `./run.sh`, kept running. `deploy.yml` targets `runs-on: [self-hosted, macOS]`; without this, every push to `main` queues a job with nothing to run it.
 2. **Enable GitHub Pages via Actions** → repo Settings → Pages → Source → **GitHub Actions** (not "Deploy from a branch"). `deploy.yml` publishes `docs/products_public.db` via `actions/upload-pages-artifact` + `actions/deploy-pages`; `docs/` is gitignored and never committed, so the branch-serving option has nothing to find.
 
+## Setup: redacting sensitive fields ([ADR-04](../13pyholofoil.wiki/decisions/adr-04-build-stage-split-mechanism.md), REQ-013, REQ-018)
+
+`sensitive_fields.json` is a manual, operator-edited list of column names that must never reach the public/redacted artifact -- nothing populates it automatically. `make build`'s `verify_redacted()` step refuses to run (and CI's `deploy.yml` refuses to publish) if any listed column is still present in the redacted db, so this file is what actually keeps cost/pricing data (`paid_total`, `paid_per_unit`, `paid_currency`) and anything else you add out of the public static copy.
+
+1. Edit `sensitive_fields.json` directly -- a flat JSON array of column names, e.g. `["paid_total", "paid_per_unit", "paid_currency"]`.
+2. Run `make build`. `build_redacted()` excludes every listed column from the redacted artifact; `verify_redacted()` then re-checks the result and fails loudly if any of them are still present, catching a stale or misconfigured artifact before it can reach `make deploy`.
+3. An empty list (the default) excludes nothing -- every column, including cost/pricing data, ships to the public copy verbatim until you populate this file.
+
 ## Usage: correcting a data error ([ADR-09](../13pyholofoil.wiki/decisions/adr-09-explore-stage-write-capability.md), REQ-010)
 
 1. Run `make explore`. Datasette prints a one-time root login URL in the terminal (the `--root` flag) -- open it in your browser once per session. Without this you're browsing anonymously: `products` is explicitly locked read-only in `datasette.yaml`, and `products_overrides` has no permission grant for anonymous actors, so the write-UI's Edit/Insert buttons won't work.

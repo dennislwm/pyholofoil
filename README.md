@@ -34,7 +34,7 @@ Not a one-time setup step -- repeat this whenever you want another independent c
      - reviewer_b
    ```
 2. Run `make transform` (or `python -m app.transform`). This creates `products_overrides_reviewer_b` and `products_merged_reviewer_b`, and generates a `copy-to-overrides-reviewer_b` canned write-query in `datasette.yaml` -- gives that table the same one-click "copy from products" convenience the primary table has, via `make explore`'s write-UI.
-3. If `explore` is already running, restart it -- `datasette.yaml` is only read at Datasette startup.
+3. If `explore` is already running, no restart needed for the new table or its canned query -- both are picked up live ([ADR-25](../13pyholofoil.wiki/decisions/adr-25-config-change-needs-no-restart.md)). A restart is only needed if you also want to grant the new table write permissions (a `tables.products_overrides_reviewer_b.permissions` block, not generated automatically -- add it by hand, matching the shape REQ-023 added for the primary table).
 4. To remove a declared table, delete its entry from `x-overrides-tables` and run `make transform` again -- the generated canned query is cleaned up automatically. **The underlying `products_overrides_<name>`/`products_merged_<name>` table and view are NOT dropped** -- only the canned query goes away. Undeclaring a table never destroys its data; re-declaring the same name later picks the existing table back up.
 
 ## Usage: declaring an extra override-only column ([ADR-10](../13pyholofoil.wiki/decisions/adr-10-overrides-view-schema-sync.md), scoped per table by [ADR-22](../13pyholofoil.wiki/decisions/adr-22-per-table-extra-columns-scope.md))
@@ -52,7 +52,7 @@ Not a one-time setup step -- repeat whenever a correction needs a field `product
    ```
    A column declared under one table is never applied to another -- each table's list is independent.
 2. Run `make transform` (or `python -m app.transform`). This adds the column to that one table via `ALTER TABLE`, defaulting existing rows to `''` (not `NULL` -- `datasette-write-ui`'s edit form errors on a `NULL`-valued field), and rebuilds that table's merged view to include it.
-3. If `explore` is already running, restart it -- `datasette.yaml` is only read at Datasette startup.
+3. If `explore` is already running, no restart needed -- Datasette reads table columns live from the database on every request, not from a startup snapshot.
 4. Adding a column via `datasette-edit-schema`'s own schema-editing UI instead of this config list works too, but existing rows are left `NULL` (no default-value option in that UI) -- backfill them yourself (`UPDATE <table> SET <col> = '' WHERE <col> IS NULL`) before editing any row through the write-UI, or the same `NULL`-crashes-the-edit-form error applies. Prefer this config-declared route: it survives a schema-recovery rebuild (ADR-08) and a fresh checkout; an ad hoc UI-added column doesn't.
 
 ## Setup: Google Sheets sync ([ADR-14](../13pyholofoil.wiki/decisions/adr-14-live-artifact-remote-access.md))

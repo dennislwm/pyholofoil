@@ -9,6 +9,16 @@ One-time steps so `deploy.yml` actually has somewhere to run and somewhere to pu
 1. **Register a self-hosted runner** → repo Settings → Actions → Runners → New self-hosted runner → pick macOS + your architecture → run the provided `./config.sh` (one-time, time-limited registration token) then `./run.sh`, kept running. `deploy.yml` targets `runs-on: [self-hosted, macOS]`; without this, every push to `main` queues a job with nothing to run it.
 2. **Enable GitHub Pages via Actions** → repo Settings → Pages → Source → **GitHub Actions** (not "Deploy from a branch"). `deploy.yml` publishes `docs/products_public.db` via `actions/upload-pages-artifact` + `actions/deploy-pages`; `docs/` is gitignored and never committed, so the branch-serving option has nothing to find.
 
+## Usage: approving a reviewed snapshot ([ADR-05](../13pyholofoil.wiki/decisions/adr-05-build-approval-gate.md), REQ-002, REQ-031)
+
+`make build` refuses to run until someone has actually looked at the data -- it checks `data/products.approved` against the live `products` table and errors (`No approval on record`) if the file is missing or stale.
+
+1. Review the data via `make explore` (see [Usage: correcting a data error](#usage-correcting-a-data-error-adr-09-req-010-adr-26) above).
+2. Once satisfied, run `make approve`. It records the current snapshot (`MAX(last_updated)` in `products`) into `data/products.approved` -- silent, no confirmation output.
+3. `make build` now proceeds. Any subsequent `make transform` that changes data invalidates the approval automatically (the recorded value no longer matches) -- no separate "expire" step, just rerun `make approve` after reviewing again.
+
+`data/products.approved` is gitignored, local-only, and holds no history -- one file, one current value, overwritten each approval. It records *that* a snapshot was reviewed, not *who* or *when*.
+
 ## Setup: redacting sensitive fields ([ADR-04](../13pyholofoil.wiki/decisions/adr-04-build-stage-split-mechanism.md), REQ-013, REQ-018)
 
 `sensitive_fields.json` is a manual, operator-edited list of column names that must never reach the public/redacted artifact -- nothing populates it automatically. `make build`'s `verify_redacted()` step refuses to run (and CI's `deploy.yml` refuses to publish) if any listed column is still present in the redacted db, so this file is what actually keeps cost/pricing data (`paid_total`, `paid_per_unit`, `paid_currency`) and anything else you add out of the public static copy.

@@ -1,5 +1,7 @@
 import json
 import sqlite3
+import subprocess
+from pathlib import Path
 
 import pytest
 
@@ -63,6 +65,31 @@ def test_build_redacted_is_idempotent(tmp_path):
     conn.close()
 
     assert count == 1
+
+
+def test_approve_makefile_target_is_idempotent(tmp_path):
+    """Runs the real `make approve` target (not a Python reimplementation of
+    its redirect) against a fixture db, twice, so a regression of the
+    Makefile's `>` to `>>` would break this test."""
+    full_db = tmp_path / "full.db"
+    anchor = _make_full_db(full_db, [("Box", "hidden")])
+
+    (tmp_path / "data").mkdir()
+    approved_path = tmp_path / "data" / "products.approved"
+    makefile_path = Path(__file__).parent.parent / "Makefile"
+
+    def run_approve():
+        subprocess.run(
+            ["make", "-f", str(makefile_path), "approve", f"DB_PATH={full_db}"],
+            cwd=tmp_path,
+            check=True,
+            capture_output=True,
+        )
+
+    run_approve()
+    run_approve()
+
+    assert approved_path.read_text().strip() == anchor
 
 
 def test_build_redacted_refuses_without_approval(tmp_path):

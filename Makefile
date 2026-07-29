@@ -1,4 +1,4 @@
-.PHONY: help setup status test check-pins explore transform build deploy sync-sheets
+.PHONY: help setup status test check-pins explore transform approve build deploy sync-sheets
 SHELL := /bin/bash
 
 help:
@@ -10,6 +10,7 @@ help:
 	@echo "  test       Run test suite"
 	@echo "  check-pins Fail if any Pipfile package is unpinned (bare \"*\")"
 	@echo "  transform  Load a ShinyExport JSON or CSV snapshot into data/products.db (default: the single file in input/, or INPUT_PATH=path/to.json|csv)"
+	@echo "  approve    Record the current products.db snapshot as reviewed (data/products.approved), required before build will run (ADR-05, REQ-002)"
 	@echo "  build      Materialize data/products_public.db, redacted per sensitive_fields.json (ADR-04)"
 	@echo "  deploy     Verify REDACTED_DB_PATH excludes every sensitive_fields.json column (REQ-013), then copy it into DOCS_DIR (default docs/) for CI to upload as a GitHub Pages artifact (ADR-17) -- view it via datasette-lite (ADR-16): https://lite.datasette.io/?url=https://$(GH_PAGES_HOST)/products_public.db"
 	@echo "  explore    Open the transformed SQLite file in Datasette (default data/products.db, override with DB_PATH=path/to.db). Prints a --root URL: visit it to get write access to products_overrides (ADR-09); products itself stays read-only."
@@ -36,6 +37,9 @@ check-pins:
 
 transform:
 	pipenv run python -m app.transform $(INPUT_PATH)
+
+approve:
+	sqlite3 $(DB_PATH) "SELECT MAX(last_updated) FROM products;" > data/products.approved
 
 build:
 	pipenv run python -m app.build --source-table $(SOURCE_TABLE)

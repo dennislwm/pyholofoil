@@ -8,6 +8,19 @@ from ruamel.yaml import YAML
 _yaml = YAML()
 
 
+def _parse_entry(value):
+    """A "_global" or per-table entry is either a bare list (back-compat:
+    columns only, sensitive_fields.yaml's original ADR-27 shape) or a dict
+    with optional "columns" (list) and "rows" (a WHERE fragment, REQ-032)
+    keys. Returns (columns_set, rows_fragment_or_none).
+    """
+    if isinstance(value, list):
+        return set(value), None
+    if value is None:
+        return set(), None
+    return set(value.get("columns", [])), value.get("rows")
+
+
 def _load_sensitive_fields(path, source_table):
     """Per ADR-27: sensitive_fields.yaml is a mapping with a "_global" key
     (applied to every table) plus optional per-table keys keyed by
@@ -19,7 +32,29 @@ def _load_sensitive_fields(path, source_table):
         data = _yaml.load(f) or []
     if isinstance(data, list):
         return set(data)
-    return set(data.get("_global", [])) | set(data.get(source_table, []))
+    global_columns, _ = _parse_entry(data.get("_global", []))
+    table_columns, _ = _parse_entry(data.get(source_table, []))
+    return global_columns | table_columns
+
+
+def _load_row_filter(path, source_table):
+    """Per REQ-032: an optional "rows" WHERE fragment declared under
+    "_global" and/or a per-table key, same config file as the column
+    redaction list. Both fragments apply when both are declared (combined
+    via AND). None means no row filtering -- every row passes through,
+    matching pre-REQ-032 behavior. Back-compat: a plain list (old flat
+    shape) has no "rows" key, so it always returns None.
+    """
+    with open(path) as f:
+        data = _yaml.load(f) or []
+    if isinstance(data, list):
+        return None
+    _, global_rows = _parse_entry(data.get("_global", []))
+    _, table_rows = _parse_entry(data.get(source_table, []))
+    fragments = [f for f in (global_rows, table_rows) if f]
+    if not fragments:
+        return None
+    return " AND ".join(f"({f})" for f in fragments)
 
 
 def _load_all_sensitive_fields(path):
@@ -59,9 +94,10 @@ def build_redacted(
     products_merged, per REQ-012 -- includes any operator corrections from
     products_overrides, ADR-09) and written into a fresh table in
     redacted_db_path via CREATE TABLE AS SELECT -- full_db_path is never
-    mutated. Row subset (per REQ-032): only rows where rarity = 'Sealed'
-    are kept -- everything else is excluded from the public/redacted
-    artifact.
+    mutated. Row subset (per REQ-032): an optional "rows" WHERE fragment in
+    sensitive_fields_path (same _global/per-table shape as the column list)
+    filters which rows are kept -- absent config means no filtering, every
+    row passes through.
 
     Idempotent: re-running replaces the redacted table rather than
     duplicating rows.
@@ -74,6 +110,7 @@ def build_redacted(
     projected through products_merged), independent of source_table.
     """
     sensitive_fields = _load_sensitive_fields(sensitive_fields_path, source_table)
+    row_filter = _load_row_filter(sensitive_fields_path, source_table)
 
     conn = sqlite3.connect(full_db_path)
     current_anchor = conn.execute("SELECT MAX(last_updated) FROM products").fetchone()[0]
@@ -97,11 +134,12 @@ def build_redacted(
     columns = [row[1] for row in conn.execute(f"PRAGMA table_info({source_table})")]
     kept = [c for c in columns if c not in sensitive_fields]
 
+    where_clause = f" WHERE {row_filter}" if row_filter else ""
     conn.execute("ATTACH DATABASE ? AS redacted", (redacted_db_path,))
     conn.execute("DROP TABLE IF EXISTS redacted.products")
     conn.execute(
         f"CREATE TABLE redacted.products AS SELECT {', '.join(kept)} "
-        f"FROM {source_table} WHERE rarity = 'Sealed'"
+        f"FROM {source_table}{where_clause}"
     )
     conn.commit()
     conn.close()

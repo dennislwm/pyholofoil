@@ -145,9 +145,44 @@ def test_main_writes_to_conventional_default_paths(tmp_path, monkeypatch):
 
 
 def test_build_redacted_keeps_only_sealed_rarity_rows(tmp_path):
-    """Per REQ-032: the public/redacted artifact must keep only rows where
-    rarity = 'Sealed' -- confirmed live against real sample data (117/315
-    rows had rarity == "Sealed" in input/ShinyExport-20260528.json)."""
+    """Per REQ-032: a "rows" WHERE fragment declared under "_global" in
+    sensitive_fields.yaml filters which rows reach the public/redacted
+    artifact -- confirmed live against real sample data (117/315 rows had
+    rarity == "Sealed" in input/ShinyExport-20260528.json)."""
+    full_db = tmp_path / "full.db"
+    conn = sqlite3.connect(str(full_db))
+    conn.execute(
+        "CREATE TABLE products (product_name TEXT, rarity TEXT, last_updated TEXT)"
+    )
+    conn.executemany(
+        "INSERT INTO products VALUES (?, ?, ?)",
+        [
+            ("Sealed Box", "Sealed", "2026-07-25T00:00:00+00:00"),
+            ("Loose Card", "Common", "2026-07-25T00:00:00+00:00"),
+        ],
+    )
+    conn.commit()
+    conn.close()
+    anchor = "2026-07-25T00:00:00+00:00"
+
+    fields_path = tmp_path / "sensitive_fields.yaml"
+    fields_path.write_text("_global:\n  rows: \"rarity = 'Sealed'\"\n")
+    approved_path = _approve(tmp_path, anchor)
+
+    redacted_db = tmp_path / "redacted.db"
+    build_redacted(str(full_db), str(redacted_db), str(fields_path), str(approved_path), "products")
+
+    conn = sqlite3.connect(str(redacted_db))
+    rows = conn.execute("SELECT product_name FROM products").fetchall()
+    conn.close()
+
+    assert rows == [("Sealed Box",)]
+
+
+def test_build_redacted_no_row_filter_configured_keeps_every_row(tmp_path):
+    """Per REQ-032: omitting "rows" from sensitive_fields.yaml (the old
+    flat/bare-list shape, or a dict with no "rows" key) keeps every row --
+    zero declared row filters means zero behavior change."""
     full_db = tmp_path / "full.db"
     conn = sqlite3.connect(str(full_db))
     conn.execute(
@@ -175,7 +210,46 @@ def test_build_redacted_keeps_only_sealed_rarity_rows(tmp_path):
     rows = conn.execute("SELECT product_name FROM products").fetchall()
     conn.close()
 
-    assert rows == [("Sealed Box",)]
+    assert len(rows) == 2
+
+
+def test_build_redacted_global_and_per_table_row_filters_combine(tmp_path):
+    """Per REQ-032: a "_global" rows fragment and a per-table rows fragment
+    both apply (combined via AND) when both are declared."""
+    full_db = tmp_path / "full.db"
+    conn = sqlite3.connect(str(full_db))
+    conn.execute(
+        "CREATE TABLE products (product_name TEXT, rarity TEXT, quantity INTEGER, last_updated TEXT)"
+    )
+    conn.executemany(
+        "INSERT INTO products VALUES (?, ?, ?, ?)",
+        [
+            ("Sealed Box A", "Sealed", 1, "2026-07-25T00:00:00+00:00"),
+            ("Sealed Box B", "Sealed", 0, "2026-07-25T00:00:00+00:00"),
+            ("Loose Card", "Common", 1, "2026-07-25T00:00:00+00:00"),
+        ],
+    )
+    conn.commit()
+    conn.close()
+    anchor = "2026-07-25T00:00:00+00:00"
+
+    fields_path = tmp_path / "sensitive_fields.yaml"
+    fields_path.write_text(
+        "_global:\n"
+        "  rows: \"rarity = 'Sealed'\"\n"
+        "products:\n"
+        "  rows: \"quantity > 0\"\n"
+    )
+    approved_path = _approve(tmp_path, anchor)
+
+    redacted_db = tmp_path / "redacted.db"
+    build_redacted(str(full_db), str(redacted_db), str(fields_path), str(approved_path), "products")
+
+    conn = sqlite3.connect(str(redacted_db))
+    rows = conn.execute("SELECT product_name FROM products").fetchall()
+    conn.close()
+
+    assert rows == [("Sealed Box A",)]
 
 
 def test_build_redacted_default_source_table_includes_overrides(tmp_path):

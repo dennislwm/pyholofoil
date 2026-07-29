@@ -113,20 +113,25 @@ One-time steps so `make explore` has a real, scoped `operator` identity instead 
 
 `sensitive_fields.yaml` is a manual, operator-edited list of column names that must never reach the public/redacted artifact -- nothing populates it automatically. A `_global` key applies to every table; a per-table key (the source-table name, e.g. `products_merged_sold`) adds columns redacted only for that table (ADR-27 -- lets tables declared via ADR-20's `x-overrides-tables` carry different sensitive columns from the primary one). `make build`'s `verify_redacted()` step refuses to run (and CI's `deploy.yml` refuses to publish) if any listed column is still present in the redacted db, so this file is what actually keeps cost/pricing data (`paid_total`, `paid_per_unit`, `paid_currency`) and anything else you add out of the public static copy.
 
+Per REQ-032, the same file also filters *rows*: give any key a `rows` WHERE fragment alongside (or instead of) `columns`, and only matching rows reach the public copy. `_global` and a per-table `rows` fragment both apply (combined with `AND`) when both are set. Omitting `rows` keeps every row -- zero behavior change.
+
 1. Edit `sensitive_fields.yaml` directly, e.g.:
    ```yaml
    _global:
-     - paid_total       # cost/purchase-price data
-     - paid_per_unit
-     - paid_currency
+     columns:
+       - paid_total       # cost/purchase-price data
+       - paid_per_unit
+       - paid_currency
+     rows: "rarity = 'Sealed'"  # loose/graded cards never reach the public copy
    products_merged_sold:
-     - sold_value_total  # sale price, same sensitivity class as paid_*
+     columns:
+       - sold_value_total  # sale price, same sensitivity class as paid_*
    ```
-   YAML comments are supported -- unlike the old flat JSON list, you can record *why* a column is listed.
+   A bare list (no `columns:`/`rows:` keys) still works under any key -- back-compat with the original columns-only shape. YAML comments are supported -- unlike the old flat JSON list, you can record *why* a column is listed.
 2. Run `make build`:
-   - `build_redacted()` excludes every column listed under `_global` plus the current `--source-table`'s own key from the redacted artifact.
-   - `verify_redacted()` then re-checks the result against every declared table's columns combined, failing loudly if any are still present -- catching a stale or misconfigured artifact before it can reach `make deploy`.
-3. An empty `_global: []` (the default) excludes nothing -- every column, including cost/pricing data, ships to the public copy verbatim until you populate this file.
+   - `build_redacted()` excludes every column listed under `_global` plus the current `--source-table`'s own key from the redacted artifact, and keeps only rows matching every declared `rows` fragment.
+   - `verify_redacted()` then re-checks the result against every declared table's columns combined, failing loudly if any are still present -- catching a stale or misconfigured artifact before it can reach `make deploy`. It does not re-check row filtering (which rows apply is determined at build time by `--source-table`; verification only ever checks columns, per ADR-27).
+3. An empty `_global: []` (the default) excludes nothing -- every column, including cost/pricing data, ships to the public copy verbatim, and every row passes through, until you populate this file.
 
 ### Setup: Google Sheets sync
 

@@ -19,26 +19,12 @@ The pipeline runs as a straight line, `transform` → `explore` → `build` → 
 
 **Supporting commands**: `make test` (test suite), `make check-pins` (fails if any `Pipfile` package is unpinned), `make status` (checks system dependencies) -- run these as needed, not part of the main flow.
 
-## Setup: operator login
-
-*Related: ADR-26*
-
-One-time steps so `make explore` has a real, scoped `operator` identity instead of Datasette's unrestricted `root` superuser -- `root` bypasses every write permission unconditionally, so `products`'s read-only lock was never actually enforced against it.
-
-1. **Generate a password hash**: `pipenv run datasette hash-password` (interactive) or `echo 'your password' | pipenv run datasette hash-password --no-confirm`.
-2. **Generate a Datasette secret**: any random string, e.g. `python3 -c "import secrets; print(secrets.token_hex(32))"`.
-3. **Store both, one command** (same `pyholofoil/env` note the Google Sheets setup already uses):
-   ```bash
-   echo -e "DATASETTE_SECRET=<value from step 2>\nDATASETTE_OPERATOR_PASSWORD_HASH=<value from step 1>" | lpass add --non-interactive --notes "pyholofoil/env"
-   ```
-4. **Run once per new terminal**: `source make.sh && load_datasette_env` -- exports both as env vars for `make explore` to read.
-
 ## Usage: correcting a data error
 
 *Related: ADR-09, REQ-010, ADR-26*
 
-1. Run `make explore` (after the one-time Setup above):
-   - Opens a login page in your browser -- log in as `operator` with the password from Setup step 1.
+1. Run `make explore` (after the one-time [operator login setup](#setup-operator-login) below):
+   - Opens a login page in your browser -- log in as `operator` with the password from that setup's step 1.
    - Without this you're browsing anonymously: `products` is explicitly locked read-only in `datasette.yaml`, and `products_overrides` only grants write access to `operator`, so the write-UI's Edit/Insert buttons won't work.
    - The login cookie persists across `make explore` restarts as long as the browser stays open (no expiry is set on it) -- only fully closing the browser forces logging in again.
 2. Open the `copy-to-overrides` canned query (Queries page) and submit the product's `id`. This copies that row into `products_overrides`, all columns NULL except what was copied -- `products` itself is never written to.
@@ -103,7 +89,25 @@ Not a one-time setup step -- repeat whenever a correction needs a field `product
    - Existing rows are left `NULL` (no default-value option in that UI) -- backfill them yourself (`UPDATE <table> SET <col> = '' WHERE <col> IS NULL`) before editing any row through the write-UI, or the same `NULL`-crashes-the-edit-form error applies.
    - Prefer this config-declared route instead: it survives a schema-recovery rebuild (ADR-08) and a fresh checkout; an ad hoc UI-added column doesn't.
 
-## Setup: redacting sensitive fields
+## Maintainer setup
+
+One-time infra/ops setup, not part of the day-to-day operator workflow above.
+
+### Setup: operator login
+
+*Related: ADR-26*
+
+One-time steps so `make explore` has a real, scoped `operator` identity instead of Datasette's unrestricted `root` superuser -- `root` bypasses every write permission unconditionally, so `products`'s read-only lock was never actually enforced against it.
+
+1. **Generate a password hash**: `pipenv run datasette hash-password` (interactive) or `echo 'your password' | pipenv run datasette hash-password --no-confirm`.
+2. **Generate a Datasette secret**: any random string, e.g. `python3 -c "import secrets; print(secrets.token_hex(32))"`.
+3. **Store both, one command** (same `pyholofoil/env` note the Google Sheets setup already uses):
+   ```bash
+   echo -e "DATASETTE_SECRET=<value from step 2>\nDATASETTE_OPERATOR_PASSWORD_HASH=<value from step 1>" | lpass add --non-interactive --notes "pyholofoil/env"
+   ```
+4. **Run once per new terminal**: `source make.sh && load_datasette_env` -- exports both as env vars for `make explore` to read.
+
+### Setup: redacting sensitive fields
 
 *Related: ADR-04, REQ-013, REQ-018*
 
@@ -115,7 +119,7 @@ Not a one-time setup step -- repeat whenever a correction needs a field `product
    - `verify_redacted()` then re-checks the result and fails loudly if any of them are still present, catching a stale or misconfigured artifact before it can reach `make deploy`.
 3. An empty list (the default) excludes nothing -- every column, including cost/pricing data, ships to the public copy verbatim until you populate this file.
 
-## Setup: Google Sheets sync
+### Setup: Google Sheets sync
 
 *Related: ADR-14*
 
@@ -133,7 +137,10 @@ One-time steps to let the CI workflow push the live artifact to a Google Sheet.
    ```bash
    echo -e "GWS_PROJECT_ID=<id from step 3>\nGWS_DEV_SHEET_ID=<id from step 5>" | lpass add --non-interactive --notes "pyholofoil/env"
    ```
-7. **Run once per new terminal** -- creates the credential file on first run, exports all three env vars, verifies the whole chain against the real Sheet:
+7. **Run once per new terminal**:
+   - Creates the credential file on first run.
+   - Exports all three env vars.
+   - Verifies the whole chain against the real Sheet.
    ```bash
    source make.sh && load_gws_env && verify_gws
    ```
@@ -141,10 +148,6 @@ One-time steps to let the CI workflow push the live artifact to a Google Sheet.
    - `GOOGLE_WORKSPACE_CLI_CREDENTIALS_FILE` = the path from step 7
    - `SPREADSHEET_ID` = the ID from step 5
    - `GOOGLE_WORKSPACE_PROJECT_ID` = the project ID from step 3 -- required even when it matches the key file's own project. Verified live: omitting it fails with `Project 'projects/<wrong-id>' not found or deleted` or a `serviceusage.services.use` permission error.
-
-## Maintainer setup
-
-One-time infrastructure steps, not part of the day-to-day operator workflow above.
 
 ### CI deploy pipeline
 

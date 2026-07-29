@@ -129,7 +129,7 @@ def test_main_writes_to_conventional_default_paths(tmp_path, monkeypatch):
     conn.execute("CREATE VIEW products_merged AS SELECT * FROM products")
     conn.commit()
     conn.close()
-    (tmp_path / "sensitive_fields.json").write_text(json.dumps(["secret_field"]))
+    (tmp_path / "sensitive_fields.yaml").write_text("_global:\n  - secret_field\n")
     (tmp_path / "data" / "products.approved").write_text(anchor)
 
     main([])
@@ -171,6 +171,61 @@ def test_build_redacted_default_source_table_includes_overrides(tmp_path):
     assert rows == [("Corrected Box",)]
 
 
+def test_build_redacted_per_table_fields_dont_leak_across_tables(tmp_path):
+    """Per ADR-27: a column listed under one table's key must not be
+    redacted for a different table that doesn't list it."""
+    full_db = tmp_path / "full.db"
+    anchor = _make_full_db(full_db, [("Box", "hidden")])
+    conn = sqlite3.connect(str(full_db))
+    conn.execute("CREATE VIEW products_merged_sold AS SELECT * FROM products")
+    conn.commit()
+    conn.close()
+
+    fields_path = tmp_path / "sensitive_fields.yaml"
+    fields_path.write_text("_global: []\nproducts_merged_sold:\n  - secret_field\n")
+    approved_path = _approve(tmp_path, anchor)
+
+    redacted_db = tmp_path / "redacted.db"
+    build_redacted(
+        str(full_db), str(redacted_db), str(fields_path), str(approved_path), "products"
+    )
+    conn = sqlite3.connect(str(redacted_db))
+    columns = [row[1] for row in conn.execute("PRAGMA table_info(products)")]
+    conn.close()
+
+    assert "secret_field" in columns
+
+
+def test_build_redacted_global_and_per_table_fields_combine(tmp_path):
+    """Per ADR-27: _global applies to every table in addition to that
+    table's own key."""
+    full_db = tmp_path / "full.db"
+    anchor = _make_full_db(full_db, [("Box", "hidden")])
+    conn = sqlite3.connect(str(full_db))
+    conn.execute(
+        "CREATE VIEW products_merged_sold AS "
+        "SELECT product_name, secret_field, 'extra' AS sold_value_total, last_updated FROM products"
+    )
+    conn.commit()
+    conn.close()
+
+    fields_path = tmp_path / "sensitive_fields.yaml"
+    fields_path.write_text(
+        "_global:\n  - secret_field\nproducts_merged_sold:\n  - sold_value_total\n"
+    )
+    approved_path = _approve(tmp_path, anchor)
+
+    redacted_db = tmp_path / "redacted.db"
+    build_redacted(
+        str(full_db), str(redacted_db), str(fields_path), str(approved_path), "products_merged_sold"
+    )
+    conn = sqlite3.connect(str(redacted_db))
+    columns = [row[1] for row in conn.execute("PRAGMA table_info(products)")]
+    conn.close()
+
+    assert columns == ["product_name", "last_updated"]
+
+
 def test_verify_redacted_passes_on_clean_artifact(tmp_path):
     redacted_db = tmp_path / "redacted.db"
     conn = sqlite3.connect(str(redacted_db))
@@ -197,6 +252,25 @@ def test_verify_redacted_refuses_leaked_sensitive_field(tmp_path):
 
     fields_path = tmp_path / "sensitive_fields.json"
     fields_path.write_text(json.dumps(["secret_field"]))
+
+    with pytest.raises(SystemExit):
+        verify_redacted(str(redacted_db), str(fields_path))
+
+
+def test_verify_redacted_catches_leak_from_any_declared_table(tmp_path):
+    """Per ADR-27: verify_redacted() isn't told which source_table built the
+    artifact, so it must catch a leak of a column declared sensitive under
+    ANY table's key, not just _global."""
+    redacted_db = tmp_path / "redacted.db"
+    conn = sqlite3.connect(str(redacted_db))
+    conn.execute("CREATE TABLE products (product_name TEXT, sold_value_total TEXT)")
+    conn.commit()
+    conn.close()
+
+    fields_path = tmp_path / "sensitive_fields.yaml"
+    fields_path.write_text(
+        "_global: []\nproducts_merged_sold:\n  - sold_value_total\n"
+    )
 
     with pytest.raises(SystemExit):
         verify_redacted(str(redacted_db), str(fields_path))

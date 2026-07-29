@@ -1,8 +1,43 @@
 import argparse
-import json
 import os
 import shutil
 import sqlite3
+
+from ruamel.yaml import YAML
+
+_yaml = YAML()
+
+
+def _load_sensitive_fields(path, source_table):
+    """Per ADR-27: sensitive_fields.yaml is a mapping with a "_global" key
+    (applied to every table) plus optional per-table keys keyed by
+    source_table name, adding to it. Back-compat: a plain list (the old
+    flat sensitive_fields.json shape) is treated entirely as "_global" --
+    zero declared per-table entries means zero behavior change.
+    """
+    with open(path) as f:
+        data = _yaml.load(f) or []
+    if isinstance(data, list):
+        return set(data)
+    return set(data.get("_global", [])) | set(data.get(source_table, []))
+
+
+def _load_all_sensitive_fields(path):
+    """Union of every declared table's sensitive fields plus "_global" --
+    used by verify_redacted(), which (per Makefile's deploy target) is
+    never told which source_table produced a given redacted artifact. A
+    superset check is safe: it can only catch more leaks, never miss one --
+    a table lacking a column can never trigger on an unrelated table's
+    field name.
+    """
+    with open(path) as f:
+        data = _yaml.load(f) or []
+    if isinstance(data, list):
+        return set(data)
+    fields = set()
+    for values in data.values():
+        fields |= set(values)
+    return fields
 
 
 def build_redacted(
@@ -10,11 +45,12 @@ def build_redacted(
 ):
     """Materialize a redacted copy of products into redacted_db_path, per ADR-04.
 
-    Column subset (all columns except those listed in sensitive_fields_path)
-    is read from source_table (default products_merged, per REQ-012 --
-    includes any operator corrections from products_overrides, ADR-09) and
-    written into a fresh table in redacted_db_path via CREATE TABLE AS
-    SELECT -- full_db_path is never mutated.
+    Column subset (all columns except those listed in sensitive_fields_path
+    for source_table, per ADR-27) is read from source_table (default
+    products_merged, per REQ-012 -- includes any operator corrections from
+    products_overrides, ADR-09) and written into a fresh table in
+    redacted_db_path via CREATE TABLE AS SELECT -- full_db_path is never
+    mutated.
 
     Idempotent: re-running replaces the redacted table rather than
     duplicating rows.
@@ -22,12 +58,11 @@ def build_redacted(
     Per ADR-05: refuses to run unless approved_file_path's contents match
     MAX(last_updated) in products -- the sidecar records which reviewed
     snapshot a person approved (ADR-06's last_updated anchor), the same way
-    sensitive_fields.json already records the redaction contract. The
+    sensitive_fields.yaml already records the redaction contract. The
     approval check always reads products directly (last_updated is not
     projected through products_merged), independent of source_table.
     """
-    with open(sensitive_fields_path) as f:
-        sensitive_fields = set(json.load(f))
+    sensitive_fields = _load_sensitive_fields(sensitive_fields_path, source_table)
 
     conn = sqlite3.connect(full_db_path)
     current_anchor = conn.execute("SELECT MAX(last_updated) FROM products").fetchone()[0]
@@ -64,12 +99,14 @@ def verify_redacted(redacted_db_path, sensitive_fields_path, table="products"):
     """Refuse to let a non-redacted artifact reach deploy, per REQ-013.
 
     Checks the actual file about to be published contains none of the
-    columns sensitive_fields.json says must be excluded -- catches a stale
-    REDACTED_DB_PATH override or any artifact that reached this path
+    columns sensitive_fields.yaml says must be excluded, for ANY declared
+    table (per ADR-27 -- this check doesn't know which source_table built
+    the artifact, so it checks the union across every table's list, which
+    is safe: see _load_all_sensitive_fields()'s docstring). Catches a
+    stale REDACTED_DB_PATH override or any artifact that reached this path
     without going through build_redacted().
     """
-    with open(sensitive_fields_path) as f:
-        sensitive_fields = set(json.load(f))
+    sensitive_fields = _load_all_sensitive_fields(sensitive_fields_path)
     conn = sqlite3.connect(redacted_db_path)
     columns = {row[1] for row in conn.execute(f"PRAGMA table_info({table})")}
     conn.close()
@@ -97,7 +134,7 @@ def main(argv=None):
     parser = argparse.ArgumentParser()
     parser.add_argument("--full-db-path", default="data/products.db")
     parser.add_argument("--redacted-db-path", default="data/products_public.db")
-    parser.add_argument("--sensitive-fields-path", default="sensitive_fields.json")
+    parser.add_argument("--sensitive-fields-path", default="sensitive_fields.yaml")
     parser.add_argument("--approved-file-path", default="data/products.approved")
     parser.add_argument("--source-table", default="products_merged")
     parser.add_argument("--verify-only", action="store_true")

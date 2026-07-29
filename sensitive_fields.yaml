@@ -1,0 +1,6 @@
+# Per ADR-27: columns listed under "_global" are redacted from every
+# table's public copy; a per-table key (the source-table name, e.g.
+# products_merged_sold) adds columns redacted only for that table.
+# Populating this is a manual, operator-owned business/privacy judgment
+# call (REQ-018) -- nothing here is derived automatically.
+_global: []

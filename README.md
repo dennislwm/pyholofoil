@@ -9,7 +9,7 @@ The pipeline runs as a straight line, `transform` → `explore` → `build` → 
 1. **`make setup`** -- installs dependencies (`pipenv install`). Nothing else runs without this.
 2. **`make transform`** -- loads a ShinyExport JSON/CSV snapshot into `data/products.db`. The pipeline's only input step; every later stage reads from the database this produces.
 3. **`make explore`** -- opens the database in Datasette to browse and correct data errors. Requires [operator login](#setup-operator-login) set up first, or login fails. **Out of band**: unlike the other steps, this isn't run once per pipeline pass -- it's a side-loop you enter whenever a data error needs fixing, as many times as needed, independent of when you last ran `transform`. See [correcting a data error](#usage-correcting-a-data-error).
-4. **`make build`** -- materializes `data/products_public.db`, a redacted copy with `sensitive_fields.json`'s columns stripped. Requires [a reviewed, approved snapshot](#usage-approving-a-reviewed-snapshot) -- refuses with `No approval on record` otherwise. Also requires [sensitive fields populated](#setup-redacting-sensitive-fields) -- an empty list ships everything unredacted.
+4. **`make build`** -- materializes `data/products_public.db`, a redacted copy with `sensitive_fields.yaml`'s columns stripped. Requires [a reviewed, approved snapshot](#usage-approving-a-reviewed-snapshot) -- refuses with `No approval on record` otherwise. Also requires [sensitive fields populated](#setup-redacting-sensitive-fields) -- an empty list ships everything unredacted.
 5. **`make deploy`**:
    - Verifies the redacted build actually excludes every sensitive field.
    - Only then publishes it for CI to upload as a public GitHub Pages artifact, viewable via datasette-lite.
@@ -109,15 +109,24 @@ One-time steps so `make explore` has a real, scoped `operator` identity instead 
 
 ### Setup: redacting sensitive fields
 
-*Related: ADR-04, REQ-013, REQ-018*
+*Related: ADR-04, ADR-27, REQ-013, REQ-018*
 
-`sensitive_fields.json` is a manual, operator-edited list of column names that must never reach the public/redacted artifact -- nothing populates it automatically. `make build`'s `verify_redacted()` step refuses to run (and CI's `deploy.yml` refuses to publish) if any listed column is still present in the redacted db, so this file is what actually keeps cost/pricing data (`paid_total`, `paid_per_unit`, `paid_currency`) and anything else you add out of the public static copy.
+`sensitive_fields.yaml` is a manual, operator-edited list of column names that must never reach the public/redacted artifact -- nothing populates it automatically. A `_global` key applies to every table; a per-table key (the source-table name, e.g. `products_merged_sold`) adds columns redacted only for that table (ADR-27 -- lets tables declared via ADR-20's `x-overrides-tables` carry different sensitive columns from the primary one). `make build`'s `verify_redacted()` step refuses to run (and CI's `deploy.yml` refuses to publish) if any listed column is still present in the redacted db, so this file is what actually keeps cost/pricing data (`paid_total`, `paid_per_unit`, `paid_currency`) and anything else you add out of the public static copy.
 
-1. Edit `sensitive_fields.json` directly -- a flat JSON array of column names, e.g. `["paid_total", "paid_per_unit", "paid_currency"]`.
+1. Edit `sensitive_fields.yaml` directly, e.g.:
+   ```yaml
+   _global:
+     - paid_total       # cost/purchase-price data
+     - paid_per_unit
+     - paid_currency
+   products_merged_sold:
+     - sold_value_total  # sale price, same sensitivity class as paid_*
+   ```
+   YAML comments are supported -- unlike the old flat JSON list, you can record *why* a column is listed.
 2. Run `make build`:
-   - `build_redacted()` excludes every listed column from the redacted artifact.
-   - `verify_redacted()` then re-checks the result and fails loudly if any of them are still present, catching a stale or misconfigured artifact before it can reach `make deploy`.
-3. An empty list (the default) excludes nothing -- every column, including cost/pricing data, ships to the public copy verbatim until you populate this file.
+   - `build_redacted()` excludes every column listed under `_global` plus the current `--source-table`'s own key from the redacted artifact.
+   - `verify_redacted()` then re-checks the result against every declared table's columns combined, failing loudly if any are still present -- catching a stale or misconfigured artifact before it can reach `make deploy`.
+3. An empty `_global: []` (the default) excludes nothing -- every column, including cost/pricing data, ships to the public copy verbatim until you populate this file.
 
 ### Setup: Google Sheets sync
 

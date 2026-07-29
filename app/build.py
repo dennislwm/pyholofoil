@@ -59,7 +59,9 @@ def build_redacted(
     products_merged, per REQ-012 -- includes any operator corrections from
     products_overrides, ADR-09) and written into a fresh table in
     redacted_db_path via CREATE TABLE AS SELECT -- full_db_path is never
-    mutated.
+    mutated. Row subset (per REQ-032): only rows where rarity = 'Sealed'
+    are kept -- everything else is excluded from the public/redacted
+    artifact.
 
     Idempotent: re-running replaces the redacted table rather than
     duplicating rows.
@@ -98,7 +100,8 @@ def build_redacted(
     conn.execute("ATTACH DATABASE ? AS redacted", (redacted_db_path,))
     conn.execute("DROP TABLE IF EXISTS redacted.products")
     conn.execute(
-        f"CREATE TABLE redacted.products AS SELECT {', '.join(kept)} FROM {source_table}"
+        f"CREATE TABLE redacted.products AS SELECT {', '.join(kept)} "
+        f"FROM {source_table} WHERE rarity = 'Sealed'"
     )
     conn.commit()
     conn.close()

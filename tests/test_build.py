@@ -9,13 +9,16 @@ from app.build import build_redacted, main, publish_static, verify_redacted
 
 
 def _make_full_db(path, rows, last_updated="2026-07-25T00:00:00+00:00"):
+    """rarity defaults to 'Sealed' for every row -- per REQ-032,
+    build_redacted() only keeps Sealed rows, and these fixtures test
+    unrelated behavior (column redaction, idempotency), not row filtering."""
     conn = sqlite3.connect(str(path))
     conn.execute(
-        "CREATE TABLE products (product_name TEXT, secret_field TEXT, last_updated TEXT)"
+        "CREATE TABLE products (product_name TEXT, secret_field TEXT, rarity TEXT, last_updated TEXT)"
     )
     conn.executemany(
-        "INSERT INTO products VALUES (?, ?, ?)",
-        [(name, secret, last_updated) for name, secret in rows],
+        "INSERT INTO products VALUES (?, ?, ?, ?)",
+        [(name, secret, "Sealed", last_updated) for name, secret in rows],
     )
     conn.commit()
     conn.close()
@@ -44,7 +47,7 @@ def test_build_redacted_removes_sensitive_fields(tmp_path):
     rows = conn.execute("SELECT product_name FROM products").fetchall()
     conn.close()
 
-    assert columns == ["product_name", "last_updated"]
+    assert columns == ["product_name", "rarity", "last_updated"]
     assert rows == [("Box",)]
 
 
@@ -138,7 +141,41 @@ def test_main_writes_to_conventional_default_paths(tmp_path, monkeypatch):
     columns = [row[1] for row in conn.execute("PRAGMA table_info(products)")]
     conn.close()
 
-    assert columns == ["product_name", "last_updated"]
+    assert columns == ["product_name", "rarity", "last_updated"]
+
+
+def test_build_redacted_keeps_only_sealed_rarity_rows(tmp_path):
+    """Per REQ-032: the public/redacted artifact must keep only rows where
+    rarity = 'Sealed' -- confirmed live against real sample data (117/315
+    rows had rarity == "Sealed" in input/ShinyExport-20260528.json)."""
+    full_db = tmp_path / "full.db"
+    conn = sqlite3.connect(str(full_db))
+    conn.execute(
+        "CREATE TABLE products (product_name TEXT, rarity TEXT, last_updated TEXT)"
+    )
+    conn.executemany(
+        "INSERT INTO products VALUES (?, ?, ?)",
+        [
+            ("Sealed Box", "Sealed", "2026-07-25T00:00:00+00:00"),
+            ("Loose Card", "Common", "2026-07-25T00:00:00+00:00"),
+        ],
+    )
+    conn.commit()
+    conn.close()
+    anchor = "2026-07-25T00:00:00+00:00"
+
+    fields_path = tmp_path / "sensitive_fields.json"
+    fields_path.write_text(json.dumps([]))
+    approved_path = _approve(tmp_path, anchor)
+
+    redacted_db = tmp_path / "redacted.db"
+    build_redacted(str(full_db), str(redacted_db), str(fields_path), str(approved_path), "products")
+
+    conn = sqlite3.connect(str(redacted_db))
+    rows = conn.execute("SELECT product_name FROM products").fetchall()
+    conn.close()
+
+    assert rows == [("Sealed Box",)]
 
 
 def test_build_redacted_default_source_table_includes_overrides(tmp_path):
@@ -150,7 +187,7 @@ def test_build_redacted_default_source_table_includes_overrides(tmp_path):
     conn = sqlite3.connect(str(full_db))
     conn.execute(
         "CREATE VIEW products_merged AS "
-        "SELECT 'Corrected Box' AS product_name, secret_field, last_updated FROM products"
+        "SELECT 'Corrected Box' AS product_name, secret_field, rarity, last_updated FROM products"
     )
     conn.commit()
     conn.close()
@@ -204,7 +241,7 @@ def test_build_redacted_global_and_per_table_fields_combine(tmp_path):
     conn = sqlite3.connect(str(full_db))
     conn.execute(
         "CREATE VIEW products_merged_sold AS "
-        "SELECT product_name, secret_field, 'extra' AS sold_value_total, last_updated FROM products"
+        "SELECT product_name, secret_field, rarity, 'extra' AS sold_value_total, last_updated FROM products"
     )
     conn.commit()
     conn.close()
@@ -223,7 +260,7 @@ def test_build_redacted_global_and_per_table_fields_combine(tmp_path):
     columns = [row[1] for row in conn.execute("PRAGMA table_info(products)")]
     conn.close()
 
-    assert columns == ["product_name", "last_updated"]
+    assert columns == ["product_name", "rarity", "last_updated"]
 
 
 def test_verify_redacted_passes_on_clean_artifact(tmp_path):

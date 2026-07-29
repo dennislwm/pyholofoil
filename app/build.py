@@ -25,10 +25,19 @@ def _load_sensitive_fields(path, source_table):
 def _load_all_sensitive_fields(path):
     """Union of every declared table's sensitive fields plus "_global" --
     used by verify_redacted(), which (per Makefile's deploy target) is
-    never told which source_table produced a given redacted artifact. A
-    superset check is safe: it can only catch more leaks, never miss one --
-    a table lacking a column can never trigger on an unrelated table's
-    field name.
+    never told which source_table produced a given redacted artifact.
+
+    No false negatives: a real leak declared under any table's key is
+    always caught, regardless of which table actually built the artifact.
+
+    False positive is possible, though not triggered by any config
+    declared today: if a column name is listed under one table's key but
+    also legitimately exists, unredacted, as a genuinely shared/different
+    column on another table, the union check flags it even when the
+    artifact being verified is correctly redacted. Acceptable for now
+    (fail-safe direction, not fail-open) but not accident-proof -- avoid
+    reusing a column name across tables' per-table keys unless it really
+    should be redacted everywhere.
     """
     with open(path) as f:
         data = _yaml.load(f) or []
@@ -101,10 +110,11 @@ def verify_redacted(redacted_db_path, sensitive_fields_path, table="products"):
     Checks the actual file about to be published contains none of the
     columns sensitive_fields.yaml says must be excluded, for ANY declared
     table (per ADR-27 -- this check doesn't know which source_table built
-    the artifact, so it checks the union across every table's list, which
-    is safe: see _load_all_sensitive_fields()'s docstring). Catches a
-    stale REDACTED_DB_PATH override or any artifact that reached this path
-    without going through build_redacted().
+    the artifact, so it checks the union across every table's list --
+    no false negatives, but see _load_all_sensitive_fields()'s docstring
+    for a false-positive edge case). Catches a stale REDACTED_DB_PATH
+    override or any artifact that reached this path without going through
+    build_redacted().
     """
     sensitive_fields = _load_all_sensitive_fields(sensitive_fields_path)
     conn = sqlite3.connect(redacted_db_path)

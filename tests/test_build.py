@@ -132,7 +132,7 @@ def test_main_writes_to_conventional_default_paths(tmp_path, monkeypatch):
     conn.execute("CREATE VIEW products_merged AS SELECT * FROM products")
     conn.commit()
     conn.close()
-    (tmp_path / "sensitive_fields.yaml").write_text("_global:\n  - secret_field\n")
+    (tmp_path / "redaction.yaml").write_text("_global:\n  - secret_field\n")
     (tmp_path / "data" / "products.approved").write_text(anchor)
 
     main([])
@@ -385,6 +385,43 @@ def test_verify_redacted_catches_leak_from_any_declared_table(tmp_path):
 
     with pytest.raises(SystemExit):
         verify_redacted(str(redacted_db), str(fields_path))
+
+
+def test_verify_redacted_catches_leak_with_dict_shaped_entries(tmp_path):
+    """Per REQ-032: an entry can now be a dict ({columns: [...], rows: "..."})
+    instead of a bare list -- verify_redacted() must still extract the
+    columns correctly, not iterate the dict's own keys ("columns"/"rows")
+    as if they were column names."""
+    redacted_db = tmp_path / "redacted.db"
+    conn = sqlite3.connect(str(redacted_db))
+    conn.execute("CREATE TABLE products (product_name TEXT, paid_total TEXT)")
+    conn.commit()
+    conn.close()
+
+    fields_path = tmp_path / "sensitive_fields.yaml"
+    fields_path.write_text(
+        "_global:\n  columns:\n    - paid_total\n  rows: \"rarity = 'Sealed'\"\n"
+    )
+
+    with pytest.raises(SystemExit):
+        verify_redacted(str(redacted_db), str(fields_path))
+
+
+def test_verify_redacted_passes_clean_artifact_with_dict_shaped_entries(tmp_path):
+    """Companion to the above: a dict-shaped entry with no actual leak must
+    not false-positive on the dict's own "columns"/"rows" keys."""
+    redacted_db = tmp_path / "redacted.db"
+    conn = sqlite3.connect(str(redacted_db))
+    conn.execute("CREATE TABLE products (product_name TEXT)")
+    conn.commit()
+    conn.close()
+
+    fields_path = tmp_path / "sensitive_fields.yaml"
+    fields_path.write_text(
+        "_global:\n  columns:\n    - paid_total\n  rows: \"rarity = 'Sealed'\"\n"
+    )
+
+    verify_redacted(str(redacted_db), str(fields_path))
 
 
 def test_publish_static_copies_into_docs_dir(tmp_path):

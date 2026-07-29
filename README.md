@@ -9,7 +9,7 @@ The pipeline runs as a straight line, `transform` → `explore` → `build` → 
 1. **`make setup`** -- installs dependencies (`pipenv install`). Nothing else runs without this.
 2. **`make transform`** -- loads a ShinyExport JSON/CSV snapshot into `data/products.db`. The pipeline's only input step; every later stage reads from the database this produces.
 3. **`make explore`** -- opens the database in Datasette to browse and correct data errors. Requires [operator login](#setup-operator-login) set up first, or login fails. **Out of band**: unlike the other steps, this isn't run once per pipeline pass -- it's a side-loop you enter whenever a data error needs fixing, as many times as needed, independent of when you last ran `transform`. See [correcting a data error](#usage-correcting-a-data-error).
-4. **`make build`** -- materializes `data/products_public.db`, a redacted copy with `sensitive_fields.yaml`'s columns stripped, keeping only rows where `rarity = 'Sealed'` (REQ-032 -- loose/graded cards never reach the public copy, sealed product only). Requires [a reviewed, approved snapshot](#usage-approving-a-reviewed-snapshot) -- refuses with `No approval on record` otherwise. Also requires [sensitive fields populated](#setup-redacting-sensitive-fields) -- an empty list ships everything unredacted.
+4. **`make build`** -- materializes `data/products_public.db`, a redacted copy with `redaction.yaml`'s columns stripped and only rows matching its `rows` filter kept (REQ-032). Requires [a reviewed, approved snapshot](#usage-approving-a-reviewed-snapshot) -- refuses with `No approval on record` otherwise. Also requires [redaction config populated](#setup-redacting-sensitive-fields) -- an empty list ships everything unredacted and unfiltered.
 5. **`make deploy`**:
    - Verifies the redacted build actually excludes every sensitive field.
    - Only then publishes it for CI to upload as a public GitHub Pages artifact, viewable via datasette-lite.
@@ -111,11 +111,11 @@ One-time steps so `make explore` has a real, scoped `operator` identity instead 
 
 *Related: ADR-04, ADR-27, REQ-013, REQ-018*
 
-`sensitive_fields.yaml` is a manual, operator-edited list of column names that must never reach the public/redacted artifact -- nothing populates it automatically. A `_global` key applies to every table; a per-table key (the source-table name, e.g. `products_merged_sold`) adds columns redacted only for that table (ADR-27 -- lets tables declared via ADR-20's `x-overrides-tables` carry different sensitive columns from the primary one). `make build`'s `verify_redacted()` step refuses to run (and CI's `deploy.yml` refuses to publish) if any listed column is still present in the redacted db, so this file is what actually keeps cost/pricing data (`paid_total`, `paid_per_unit`, `paid_currency`) and anything else you add out of the public static copy.
+`redaction.yaml` is a manual, operator-edited list of column names that must never reach the public/redacted artifact -- nothing populates it automatically. A `_global` key applies to every table; a per-table key (the source-table name, e.g. `products_merged_sold`) adds columns redacted only for that table (ADR-27 -- lets tables declared via ADR-20's `x-overrides-tables` carry different sensitive columns from the primary one). `make build`'s `verify_redacted()` step refuses to run (and CI's `deploy.yml` refuses to publish) if any listed column is still present in the redacted db, so this file is what actually keeps cost/pricing data (`paid_total`, `paid_per_unit`, `paid_currency`) and anything else you add out of the public static copy.
 
 Per REQ-032, the same file also filters *rows*: give any key a `rows` WHERE fragment alongside (or instead of) `columns`, and only matching rows reach the public copy. `_global` and a per-table `rows` fragment both apply (combined with `AND`) when both are set. Omitting `rows` keeps every row -- zero behavior change.
 
-1. Edit `sensitive_fields.yaml` directly, e.g.:
+1. Edit `redaction.yaml` directly, e.g.:
    ```yaml
    _global:
      columns:

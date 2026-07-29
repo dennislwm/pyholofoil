@@ -10,7 +10,7 @@ _yaml = YAML()
 
 def _parse_entry(value):
     """A "_global" or per-table entry is either a bare list (back-compat:
-    columns only, sensitive_fields.yaml's original ADR-27 shape) or a dict
+    columns only, redaction.yaml's original ADR-27 shape) or a dict
     with optional "columns" (list) and "rows" (a WHERE fragment, REQ-032)
     keys. Returns (columns_set, rows_fragment_or_none).
     """
@@ -22,7 +22,7 @@ def _parse_entry(value):
 
 
 def _load_sensitive_fields(path, source_table):
-    """Per ADR-27: sensitive_fields.yaml is a mapping with a "_global" key
+    """Per ADR-27: redaction.yaml is a mapping with a "_global" key
     (applied to every table) plus optional per-table keys keyed by
     source_table name, adding to it. Back-compat: a plain list (the old
     flat sensitive_fields.json shape) is treated entirely as "_global" --
@@ -79,23 +79,24 @@ def _load_all_sensitive_fields(path):
     if isinstance(data, list):
         return set(data)
     fields = set()
-    for values in data.values():
-        fields |= set(values)
+    for value in data.values():
+        columns, _ = _parse_entry(value)
+        fields |= columns
     return fields
 
 
 def build_redacted(
-    full_db_path, redacted_db_path, sensitive_fields_path, approved_file_path, source_table
+    full_db_path, redacted_db_path, redaction_path, approved_file_path, source_table
 ):
     """Materialize a redacted copy of products into redacted_db_path, per ADR-04.
 
-    Column subset (all columns except those listed in sensitive_fields_path
+    Column subset (all columns except those listed in redaction_path
     for source_table, per ADR-27) is read from source_table (default
     products_merged, per REQ-012 -- includes any operator corrections from
     products_overrides, ADR-09) and written into a fresh table in
     redacted_db_path via CREATE TABLE AS SELECT -- full_db_path is never
     mutated. Row subset (per REQ-032): an optional "rows" WHERE fragment in
-    sensitive_fields_path (same _global/per-table shape as the column list)
+    redaction_path (same _global/per-table shape as the column list)
     filters which rows are kept -- absent config means no filtering, every
     row passes through.
 
@@ -105,12 +106,12 @@ def build_redacted(
     Per ADR-05: refuses to run unless approved_file_path's contents match
     MAX(last_updated) in products -- the sidecar records which reviewed
     snapshot a person approved (ADR-06's last_updated anchor), the same way
-    sensitive_fields.yaml already records the redaction contract. The
+    redaction.yaml already records the redaction contract. The
     approval check always reads products directly (last_updated is not
     projected through products_merged), independent of source_table.
     """
-    sensitive_fields = _load_sensitive_fields(sensitive_fields_path, source_table)
-    row_filter = _load_row_filter(sensitive_fields_path, source_table)
+    sensitive_fields = _load_sensitive_fields(redaction_path, source_table)
+    row_filter = _load_row_filter(redaction_path, source_table)
 
     conn = sqlite3.connect(full_db_path)
     current_anchor = conn.execute("SELECT MAX(last_updated) FROM products").fetchone()[0]
@@ -145,11 +146,11 @@ def build_redacted(
     conn.close()
 
 
-def verify_redacted(redacted_db_path, sensitive_fields_path, table="products"):
+def verify_redacted(redacted_db_path, redaction_path, table="products"):
     """Refuse to let a non-redacted artifact reach deploy, per REQ-013.
 
     Checks the actual file about to be published contains none of the
-    columns sensitive_fields.yaml says must be excluded, for ANY declared
+    columns redaction.yaml says must be excluded, for ANY declared
     table (per ADR-27 -- this check doesn't know which source_table built
     the artifact, so it checks the union across every table's list --
     no false negatives, but see _load_all_sensitive_fields()'s docstring
@@ -157,7 +158,7 @@ def verify_redacted(redacted_db_path, sensitive_fields_path, table="products"):
     override or any artifact that reached this path without going through
     build_redacted().
     """
-    sensitive_fields = _load_all_sensitive_fields(sensitive_fields_path)
+    sensitive_fields = _load_all_sensitive_fields(redaction_path)
     conn = sqlite3.connect(redacted_db_path)
     columns = {row[1] for row in conn.execute(f"PRAGMA table_info({table})")}
     conn.close()
@@ -185,7 +186,7 @@ def main(argv=None):
     parser = argparse.ArgumentParser()
     parser.add_argument("--full-db-path", default="data/products.db")
     parser.add_argument("--redacted-db-path", default="data/products_public.db")
-    parser.add_argument("--sensitive-fields-path", default="sensitive_fields.yaml")
+    parser.add_argument("--redaction-path", default="redaction.yaml")
     parser.add_argument("--approved-file-path", default="data/products.approved")
     parser.add_argument("--source-table", default="products_merged")
     parser.add_argument("--verify-only", action="store_true")
@@ -193,7 +194,7 @@ def main(argv=None):
     parser.add_argument("--docs-dir", default="docs")
     args = parser.parse_args(argv)
     if args.verify_only:
-        verify_redacted(args.redacted_db_path, args.sensitive_fields_path)
+        verify_redacted(args.redacted_db_path, args.redaction_path)
         return
     if args.publish_static:
         dest = publish_static(args.redacted_db_path, args.docs_dir)
@@ -203,7 +204,7 @@ def main(argv=None):
     build_redacted(
         args.full_db_path,
         args.redacted_db_path,
-        args.sensitive_fields_path,
+        args.redaction_path,
         args.approved_file_path,
         args.source_table,
     )

@@ -37,6 +37,13 @@ databases:
             sold_remarks = COALESCE(sold_remarks, '')
         write: true
         on_success_redirect: /products/products_overrides_sold
+      copy-to-overrides-sealed:
+        sql: |-
+          INSERT INTO products_overrides_sealed (id, product_name, set_name, brand_name, discriminator, rarity, quantity, value_total, value_per_unit, value_currency, paid_total, paid_per_unit, paid_currency, grade_type, grade_subtype, group_name, group_wishlist, tcgplayer_id, pricecharting_id, doubleholo_id, date_added, tag)
+          SELECT id, product_name, set_name, brand_name, discriminator, rarity, quantity, value_total, value_per_unit, value_currency, paid_total, paid_per_unit, paid_currency, grade_type, grade_subtype, group_name, group_wishlist, tcgplayer_id, pricecharting_id, doubleholo_id, date_added, tag FROM products WHERE id = :id
+          ON CONFLICT(id) DO NOTHING
+        write: true
+        on_success_redirect: /products/products_overrides_sealed
     tables:
       products:
         permissions:
@@ -68,6 +75,7 @@ databases:
         - sold_value_per_unit
         - sold_remarks
 x-overrides-tables:
+- sealed
 - sold
 plugins:
   datasette-auth-passwords:

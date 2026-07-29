@@ -3,4 +3,13 @@
 # products_merged_sold) adds columns redacted only for that table.
 # Populating this is a manual, operator-owned business/privacy judgment
 # call (REQ-018) -- nothing here is derived automatically.
-_global: []
+_global:
+  - grade_type
+  - paid_currency
+  - grade_subtype
+  - group_name
+  - group_wishlist
+  - tag
+  - doubleholo_id
+  - discriminator
+  - last_updated

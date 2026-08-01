@@ -10,6 +10,7 @@
 # are set) are kept; omitting "rows" keeps every row.
 _global:
   columns:
+    - id
     - grade_type
     - paid_currency
     - grade_subtype
@@ -19,4 +20,13 @@ _global:
     - doubleholo_id
     - discriminator
     - last_updated
+    - brand_name
+    - value_total
+    - value_currency
+    - paid_total
+products_merged_sealed:
+  columns:
+    - rarity
+    - tcgplayer_id
+    - pricecharting_id
   rows: "rarity = 'Sealed'"

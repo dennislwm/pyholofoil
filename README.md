@@ -99,11 +99,11 @@ One-time infra/ops setup, not part of the day-to-day operator workflow above.
 
 One-time steps so `make explore` has a real, scoped `operator` identity instead of Datasette's unrestricted `root` superuser -- `root` bypasses every write permission unconditionally, so `products`'s read-only lock was never actually enforced against it.
 
-1. **Generate a password hash**: `pipenv run datasette hash-password` (interactive) or `echo 'your password' | pipenv run datasette hash-password --no-confirm`.
-2. **Generate a Datasette secret**: any random string, e.g. `python3 -c "import secrets; print(secrets.token_hex(32))"`.
-3. **Store both, one command** (same `pyholofoil/env` note the Google Sheets setup already uses):
+1. **Generate a password hash**: `HASH=$(pipenv run datasette hash-password --no-confirm <<< 'your password')`.
+2. **Generate a Datasette secret**: `SECRET=$(python3 -c "import secrets; print(secrets.token_hex(32))")`.
+3. **Store both, one command** (same `pyholofoil/env` note the Google Sheets setup already uses; keep the hash/secret in variables rather than pasting them literally -- the hash's own `$` delimiters get silently stripped inside a double-quoted string otherwise):
    ```bash
-   echo -e "DATASETTE_SECRET=<value from step 2>\nDATASETTE_OPERATOR_PASSWORD_HASH=<value from step 1>" | lpass add --non-interactive --notes "pyholofoil/env"
+   echo -e "DATASETTE_SECRET=$SECRET\nDATASETTE_OPERATOR_PASSWORD_HASH=$HASH" | lpass add --non-interactive --notes "pyholofoil/env"
    ```
 4. **Run once per new terminal**: `source make.sh && load_datasette_env` -- exports both as env vars for `make explore` to read.
 

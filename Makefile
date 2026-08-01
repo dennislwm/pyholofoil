@@ -3,18 +3,38 @@ SHELL := /bin/bash
 
 help:
 	@echo ""
+	@echo "Workflow: setup -> transform -> explore (side-loop, as needed) -> approve -> build -> deploy"
+	@echo "Parallel branch: sync-sheets (off transform's output, independent of build/deploy)"
+	@echo ""
 	@echo "=== Targets ==="
-	@echo "  help       Show this help"
-	@echo "  setup      pipenv install from Pipfile"
-	@echo "  status     Check system dependencies"
-	@echo "  test       Run test suite"
-	@echo "  check-pins Fail if any Pipfile package is unpinned (bare \"*\")"
-	@echo "  transform  Load a ShinyExport JSON or CSV snapshot into data/products.db (default: the single file in input/, or INPUT_PATH=path/to.json|csv)"
-	@echo "  approve    Record the current products.db snapshot as reviewed (data/products.approved), required before build will run (ADR-05, REQ-002)"
-	@echo "  build      Materialize data/products_public.db, redacted per redaction.yaml (ADR-04, ADR-27, REQ-032)"
-	@echo "  deploy     Verify REDACTED_DB_PATH excludes every redaction.yaml column (REQ-013), then copy it into DOCS_DIR (default docs/) for CI to upload as a GitHub Pages artifact (ADR-17) -- view it via datasette-lite (ADR-16): https://lite.datasette.io/?url=https://$(GH_PAGES_HOST)/products_public.db"
-	@echo "  explore    Open the transformed SQLite file in Datasette (default data/products.db, override with DB_PATH=path/to.db). Prints a --root URL: visit it to get write access to products_overrides (ADR-09); products itself stays read-only."
-	@echo "  sync-sheets  Push products_merged (full data, including sensitive fields -- this is the live artifact, not the redacted one) to a Google Sheet via gws (ADR-14). Requires SPREADSHEET_ID, GOOGLE_WORKSPACE_CLI_CREDENTIALS_FILE (service account key path), and GOOGLE_WORKSPACE_PROJECT_ID (quota/billing project -- may differ from the key file's own project). The Sheet's own sharing settings control who can view it -- same as any personal Google Sheet, not automatically public."
+	@echo "  help         Show this help"
+	@echo "  setup        pipenv install from Pipfile"
+	@echo "  status       Check system dependencies"
+	@echo "  test         Run test suite"
+	@echo "  check-pins   Fail if any Pipfile package is unpinned"
+	@echo "  transform    Load a ShinyExport JSON/CSV into data/products.db"
+	@echo "               INPUT_PATH: single file in input/"
+	@for f in $(INPUT_FILES); do echo "               INPUT_PATH: $$f"; done
+	@echo "  approve      Record products.db snapshot as reviewed (required before build)"
+	@echo "               DB_PATH: data/products.db"
+	@for f in $(DATA_DBS); do echo "               DB_PATH: $$f"; done
+	@echo "  build        Materialize data/products_public.db, redacted per redaction.yaml"
+	@echo "               SOURCE_TABLE: products_merged"
+	@for t in $(OVERRIDES_TABLES); do echo "               SOURCE_TABLE: $$t"; done
+	@echo "  deploy       Copy the redacted DB into DOCS_DIR for CI to publish"
+	@echo "               REDACTED_DB_PATH: data/products_public.db"
+	@echo "               DOCS_DIR: docs"
+	@echo "  explore      Open the transformed SQLite file in Datasette"
+	@echo "               DB_PATH: data/products.db"
+	@for f in $(DATA_DBS); do echo "               DB_PATH: $$f"; done
+	@echo "               run 'source make.sh && load_datasette_env' first (local only; CI sets it as a repo variable)"
+	@echo "  sync-sheets  Push full products_merged data to a Google Sheet via gws"
+	@echo "               DB_PATH: data/products.db"
+	@for f in $(DATA_DBS); do echo "               DB_PATH: $$f"; done
+	@echo "               SOURCE_TABLE: products_merged"
+	@for t in $(OVERRIDES_TABLES); do echo "               SOURCE_TABLE: $$t"; done
+	@echo "               SPREADSHEET_ID: required, no default"
+	@echo "               run 'source make.sh && load_gws_env' first (local only; CI sets it as a repo variable)"
 	@echo ""
 
 DB_PATH ?= data/products.db
@@ -22,6 +42,9 @@ SOURCE_TABLE ?= products_merged
 REDACTED_DB_PATH ?= data/products_public.db
 DOCS_DIR ?= docs
 GH_PAGES_HOST ?= dennislwm.github.io/pyholofoil
+OVERRIDES_TABLES := $(shell awk '/^x-overrides-tables:/{f=1;next} f&&/^- /{print "products_merged_" substr($$0,3)} f&&!/^- /{f=0}' datasette.yaml)
+INPUT_FILES := $(shell ls input/ 2>/dev/null)
+DATA_DBS := $(shell ls data/*.db 2>/dev/null | grep -v '^$(DB_PATH)$$')
 
 setup:
 	@source ./make.sh && setup_commands

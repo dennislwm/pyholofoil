@@ -60,6 +60,17 @@ databases:
             id: operator
           delete-row:
             id: operator
+      products_overrides_sealed:
+        permissions:
+          insert-row:
+            id: operator
+          update-row:
+            id: operator
+          delete-row:
+            id: operator
+        x-overrides-extra-columns:
+        - cltr_value_per_unit
+        - fbgp_value_per_unit
       products_overrides_sold:
         permissions:
           insert-row:

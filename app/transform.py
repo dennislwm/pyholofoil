@@ -252,7 +252,12 @@ def _pick_input_file(input_dir):
     no fixed filename required. Never guess a "latest" file -- mtime is
     fragile (depends on how a file was copied) and the filename is not
     parsed for a date."""
-    files = sorted(os.listdir(input_dir)) if os.path.isdir(input_dir) else []
+    files = sorted(
+        f
+        for f in (os.listdir(input_dir) if os.path.isdir(input_dir) else [])
+        if f.endswith((".csv", ".json"))
+        and os.path.isfile(os.path.join(input_dir, f))
+    )
     if not files:
         raise SystemExit(f"No input file found in {input_dir}/")
     if len(files) > 1:

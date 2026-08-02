@@ -86,8 +86,8 @@ Not a one-time setup step -- repeat whenever a correction needs a field `product
    - Rebuilds that table's merged view to include it.
 3. If `explore` is already running, no restart needed -- Datasette reads table columns live from the database on every request, not from a startup snapshot.
 4. Adding a column via `datasette-edit-schema`'s own schema-editing UI instead of this config list works too, but:
-   - Existing rows are left `NULL` (no default-value option in that UI) -- backfill them yourself (`UPDATE <table> SET <col> = '' WHERE <col> IS NULL`) before editing any row through the write-UI, or the same `NULL`-crashes-the-edit-form error applies.
-   - Prefer this config-declared route instead: it survives a schema-recovery rebuild (ADR-08) and a fresh checkout; an ad hoc UI-added column doesn't.
+   - Existing rows are left `NULL` (no default-value option in that UI), and the same `NULL`-crashes-the-edit-form error applies until backfilled. Once the column is also added to `x-overrides-extra-columns` (step 1) and `make transform` has run (step 2), a matching `backfill-null-extra-columns-<table_name>` canned query is generated automatically -- run it once from that table's page to clear every `NULL` to `''`.
+   - Prefer the config-declared route instead: it survives a schema-recovery rebuild (ADR-08) and a fresh checkout; an ad hoc UI-added column doesn't.
 
 ## Maintainer setup
 

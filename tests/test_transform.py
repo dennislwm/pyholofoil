@@ -638,6 +638,69 @@ def test_generate_overrides_queries_removes_undeclared_entries(tmp_path, monkeyp
     assert "copy-to-overrides-reviewer_b:" not in yaml_path.read_text()
 
 
+def test_generate_backfill_query_for_table_with_extra_columns(tmp_path, monkeypatch):
+    """A table declaring x-overrides-extra-columns must get a generated
+    backfill-null-extra-columns-<name> query, COALESCE-ing each declared
+    extra column to '' -- covers rows left NULL by an ad hoc
+    datasette-edit-schema column add (REQ-024 only backfills the
+    config-declared ALTER TABLE path)."""
+    monkeypatch.chdir(tmp_path)
+    (tmp_path / "datasette.yaml").write_text(
+        "databases:\n"
+        "  products:\n"
+        "    queries: {}\n"
+        "    tables:\n"
+        "      products_overrides_sold:\n"
+        "        x-overrides-extra-columns:\n"
+        "        - date_sold\n"
+        "        - sold_remarks\n"
+        "x-overrides-tables:\n  - sold\n"
+    )
+    db_path = tmp_path / "products.db"
+    json_path = tmp_path / "shiny.json"
+    json_path.write_text(json.dumps([{"id": "aaa", "product_name": "X"}]))
+
+    load_products(str(json_path), str(db_path))
+
+    out = (tmp_path / "datasette.yaml").read_text()
+
+    assert "backfill-null-extra-columns-sold:" in out
+    assert "date_sold = COALESCE(date_sold, '')" in out
+    assert "sold_remarks = COALESCE(sold_remarks, '')" in out
+    assert "on_success_redirect: /products/products_overrides_sold" in out
+
+
+def test_generate_backfill_query_removed_when_extra_columns_cleared(tmp_path, monkeypatch):
+    """A table that no longer declares any x-overrides-extra-columns must
+    have its stale backfill query removed, not left pointing at columns
+    that are no longer config-declared."""
+    monkeypatch.chdir(tmp_path)
+    yaml_path = tmp_path / "datasette.yaml"
+    yaml_path.write_text(
+        "databases:\n"
+        "  products:\n"
+        "    queries: {}\n"
+        "    tables:\n"
+        "      products_overrides_sold:\n"
+        "        x-overrides-extra-columns:\n"
+        "        - date_sold\n"
+        "x-overrides-tables:\n  - sold\n"
+    )
+    db_path = tmp_path / "products.db"
+    json_path = tmp_path / "shiny.json"
+    json_path.write_text(json.dumps([{"id": "aaa", "product_name": "X"}]))
+
+    load_products(str(json_path), str(db_path))
+    assert "backfill-null-extra-columns-sold:" in yaml_path.read_text()
+
+    yaml_path.write_text(
+        "databases:\n  products:\n    queries: {}\nx-overrides-tables:\n  - sold\n"
+    )
+    load_products(str(json_path), str(db_path))
+
+    assert "backfill-null-extra-columns-sold:" not in yaml_path.read_text()
+
+
 def test_generate_overrides_queries_noop_without_queries_section(tmp_path, monkeypatch):
     """A datasette.yaml with no databases.products.queries section (e.g. a
     fresh checkout predating ADR-20) must not error and must not invent

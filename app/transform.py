@@ -146,18 +146,27 @@ def _ensure_overrides(conn, columns, name=None):
 
 
 def _generate_overrides_queries(columns, config_path="datasette.yaml"):
-    """Per ADR-20 (Option 2): writes one canned write-query per declared
-    extra overrides table into datasette.yaml, via ruamel.yaml's
-    round-trip mode -- structural mutation of the parsed config, not a
-    plain-text marker splice. ruamel preserves every comment, key order,
-    and the hand-authored `copy-to-overrides` query's block-scalar
-    formatting untouched (confirmed live against this file); plain
-    PyYAML's safe_load()+dump() strips all of that (also confirmed
-    live). Generated entries are identified by the `copy-to-overrides-`
-    prefix (the primary key `copy-to-overrides` itself never matches) --
-    any such key not in the current declared-names list is removed each
-    run, so renaming/removing a declared table cleans up after itself,
-    not just adding new ones."""
+    """Per ADR-20 (Option 2): writes canned write-queries per declared extra
+    overrides table into datasette.yaml, via ruamel.yaml's round-trip mode
+    -- structural mutation of the parsed config, not a plain-text marker
+    splice. ruamel preserves every comment, key order, and the
+    hand-authored `copy-to-overrides` query's block-scalar formatting
+    untouched (confirmed live against this file); plain PyYAML's
+    safe_load()+dump() strips all of that (also confirmed live).
+
+    Two query kinds, both keyed off the same per-table config: a
+    `copy-to-overrides-<name>` (always) and, only when that table declares
+    `x-overrides-extra-columns`, a `backfill-null-extra-columns-<name>`
+    (COALESCE-backfills existing rows' NULLs left by an ad hoc
+    `datasette-edit-schema` column add -- config-declared columns already
+    get their DEFAULT '' at ALTER TABLE time via `_ensure_overrides`, per
+    REQ-024; this covers the UI-added path that doesn't). Generated
+    entries are identified by their `copy-to-overrides-`/
+    `backfill-null-extra-columns-` prefixes (a bare `copy-to-overrides` key
+    never matches either) -- any such key not matching the current
+    declared-names list, or (for backfill) no longer having extra columns,
+    is removed each run, so renaming/removing a declared table or its
+    extra columns cleans up after itself, not just adding new ones."""
     names = _load_extra_overrides_tables(config_path)
     override_cols = [c for c in columns if c != "last_updated"]
     col_csv = ", ".join(override_cols)
@@ -176,6 +185,9 @@ def _generate_overrides_queries(columns, config_path="datasette.yaml"):
     for key in [k for k in queries if k.startswith("copy-to-overrides-")]:
         if key[len("copy-to-overrides-"):] not in names:
             del queries[key]
+    for key in [k for k in queries if k.startswith("backfill-null-extra-columns-")]:
+        if key[len("backfill-null-extra-columns-"):] not in names:
+            del queries[key]
 
     for name in names:
         queries[f"copy-to-overrides-{name}"] = {
@@ -187,6 +199,18 @@ def _generate_overrides_queries(columns, config_path="datasette.yaml"):
             "write": True,
             "on_success_redirect": f"/products/products_overrides_{name}",
         }
+        extra_cols = _load_extra_override_columns(config_path, name=name)
+        if extra_cols:
+            queries[f"backfill-null-extra-columns-{name}"] = {
+                "sql": LiteralScalarString(
+                    f"UPDATE products_overrides_{name} SET\n"
+                    + ",\n".join(f"  {c} = COALESCE({c}, '')" for c in extra_cols)
+                ),
+                "write": True,
+                "on_success_redirect": f"/products/products_overrides_{name}",
+            }
+        else:
+            queries.pop(f"backfill-null-extra-columns-{name}", None)
 
     # REQ-034: mark the generated block so a reader inspecting datasette.yaml
     # directly doesn't mistake it for hand-authored/hand-duplicated config.

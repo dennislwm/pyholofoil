@@ -594,6 +594,36 @@ def test_generate_overrides_queries_preserves_hand_authored_content(
     assert "on_success_redirect: /products/products_overrides_reviewer_b" in out
 
 
+def test_generate_overrides_queries_adds_table_permissions(tmp_path, monkeypatch):
+    """A declared overrides table must get the same operator-scoped
+    insert/update/delete-row permissions as the hand-authored ones (e.g.
+    products_overrides_sold) -- the generator must not produce a table
+    that's writable via canned query but has no row-permission gate."""
+    monkeypatch.chdir(tmp_path)
+    (tmp_path / "datasette.yaml").write_text(
+        "databases:\n"
+        "  products:\n"
+        "    queries: {}\n"
+        "    tables: {}\n"
+        "x-overrides-tables:\n"
+        "  - reviewer_b\n"
+    )
+    db_path = tmp_path / "products.db"
+    json_path = tmp_path / "shiny.json"
+    json_path.write_text(json.dumps([{"id": "aaa", "product_name": "X"}]))
+
+    load_products(str(json_path), str(db_path))
+
+    out = (tmp_path / "datasette.yaml").read_text()
+    assert "products_overrides_reviewer_b:" in out
+    idx = out.index("products_overrides_reviewer_b:")
+    table_block = out[idx:idx + 200]
+    assert "insert-row:" in table_block
+    assert "update-row:" in table_block
+    assert "delete-row:" in table_block
+    assert "id: operator" in table_block
+
+
 def test_generate_overrides_queries_is_idempotent(tmp_path, monkeypatch):
     """Running load_products twice with the same declared tables must not
     duplicate the generated canned-query entry."""

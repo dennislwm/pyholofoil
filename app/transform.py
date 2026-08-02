@@ -182,6 +182,18 @@ def _generate_overrides_queries(columns, config_path="datasette.yaml"):
     if queries is None:
         return  # no queries section to generate into -- nothing to do
 
+    tables = products_map.get("tables")
+    if tables is not None:
+        for name in names:
+            table = f"products_overrides_{name}"
+            if table not in tables:
+                tables[table] = {}
+            tables[table].setdefault("permissions", {
+                "insert-row": {"id": "operator"},
+                "update-row": {"id": "operator"},
+                "delete-row": {"id": "operator"},
+            })
+
     for key in [k for k in queries if k.startswith("copy-to-overrides-")]:
         if key[len("copy-to-overrides-"):] not in names:
             del queries[key]

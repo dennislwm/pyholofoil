@@ -96,6 +96,32 @@ def test_load_products_sets_last_updated_on_write(tmp_path):
     assert last_updated is not None
 
 
+def test_load_products_deletes_row_absent_from_current_export(tmp_path):
+    """Per REQ-035: every ShinyExport is a full-inventory snapshot, so an id
+    missing from the current run's file has been genuinely removed, not
+    partially exported -- transform must delete it from products, not leave
+    it stale forever."""
+    json_path = tmp_path / "shiny.json"
+    db_path = tmp_path / "pyholofoil.db"
+
+    json_path.write_text(json.dumps([
+        {"id": "aaa", "product_name": "X"},
+        {"id": "bbb", "product_name": "Y"},
+    ]))
+    load_products(str(json_path), str(db_path))
+
+    json_path.write_text(json.dumps([
+        {"id": "aaa", "product_name": "X"},
+    ]))
+    load_products(str(json_path), str(db_path))
+
+    conn = sqlite3.connect(str(db_path))
+    ids = {row[0] for row in conn.execute("SELECT id FROM products").fetchall()}
+    conn.close()
+
+    assert ids == {"aaa"}
+
+
 def test_load_products_against_pre_adr06_schema_table_fails_clearly(tmp_path):
     """Per ADR-08: a products.db left over from before ADR-06 still has the
     old snapshot_date-keyed schema (no last_updated column, no PRIMARY
@@ -263,6 +289,42 @@ def test_products_merged_falls_back_to_products_when_no_override(tmp_path):
     conn.close()
 
     assert row == ("151 Booster Box Case",)
+
+
+def test_products_merged_shows_row_deleted_from_products_but_present_in_overrides(tmp_path):
+    """Per REQ-035: products_merged must FULL OUTER JOIN products with its
+    overrides table, so a row hard-deleted from products (absent from a
+    later export) but still referenced in products_overrides doesn't
+    silently vanish from the merged view."""
+    db_path = tmp_path / "products.db"
+    json_path = tmp_path / "shiny.json"
+    json_path.write_text(json.dumps([
+        {"id": "aaa", "product_name": "X"},
+    ]))
+    load_products(str(json_path), str(db_path))
+
+    conn = sqlite3.connect(str(db_path))
+    conn.execute(
+        "INSERT INTO products_overrides (id, product_name) VALUES (?, ?)",
+        ("aaa", "Corrected Name"),
+    )
+    conn.commit()
+    conn.close()
+
+    # aaa is absent from this export -> hard-deleted from products, but its
+    # override row survives untouched.
+    json_path.write_text(json.dumps([
+        {"id": "zzz", "product_name": "Z"},
+    ]))
+    load_products(str(json_path), str(db_path))
+
+    conn = sqlite3.connect(str(db_path))
+    row = conn.execute(
+        "SELECT product_name FROM products_merged WHERE id = ?", ("aaa",)
+    ).fetchone()
+    conn.close()
+
+    assert row == ("Corrected Name",)
 
 
 def test_config_declared_override_column_appears_in_merged_view(tmp_path, monkeypatch):

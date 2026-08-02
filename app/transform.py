@@ -132,7 +132,7 @@ def _ensure_overrides(conn, columns, name=None):
 
     all_override_cols = override_cols + extra_cols
     merge_cols = ", ".join(
-        "p.id" if c == "id"
+        "COALESCE(p.id, o.id) AS id" if c == "id"
         else f"COALESCE(o.{c}, p.{c}) AS {c}" if c in override_cols
         else f"o.{c}"
         for c in all_override_cols
@@ -141,7 +141,7 @@ def _ensure_overrides(conn, columns, name=None):
     conn.execute(
         f"CREATE VIEW {view} AS "
         f"SELECT {merge_cols}, p.last_updated FROM products p "
-        f"LEFT JOIN {table} o ON p.id = o.id"
+        f"FULL OUTER JOIN {table} o ON p.id = o.id"
     )
 
 
@@ -238,6 +238,14 @@ def load_products(input_path, db_path):
         "ON CONFLICT(id) DO UPDATE SET "
         + ", ".join(f"{c} = excluded.{c}" for c in update_cols),
         [tuple(r.get(c) for c in columns[:-1]) + (now,) for r in records],
+    )
+    # Per REQ-035: every ShinyExport is a full-inventory snapshot, so an id
+    # absent from this run's file has been genuinely removed, not partially
+    # exported -- hard-delete it rather than leaving it stale forever.
+    ids = [r.get("id") for r in records]
+    conn.execute(
+        f"DELETE FROM products WHERE id NOT IN ({', '.join('?' for _ in ids)})",
+        ids,
     )
     _ensure_overrides(conn, columns)
     for name in _load_extra_overrides_tables():

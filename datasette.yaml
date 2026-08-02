@@ -66,6 +66,13 @@ databases:
             fbgp_value_per_unit = COALESCE(fbgp_value_per_unit, '')
         write: true
         on_success_redirect: /products/products_overrides_sealed
+      backfill-null-extra-columns-raw:
+        sql: |-
+          UPDATE products_overrides_raw SET
+            cltr_value_per_unit = COALESCE(cltr_value_per_unit, ''),
+            fbgp_value_per_unit = COALESCE(fbgp_value_per_unit, '')
+        write: true
+        on_success_redirect: /products/products_overrides_raw
     tables:
       products:
         permissions:
@@ -90,6 +97,9 @@ databases:
             id: operator
           delete-row:
             id: operator
+        x-overrides-extra-columns:
+        - cltr_value_per_unit
+        - fbgp_value_per_unit
       products_overrides_graded:
         permissions:
           insert-row:

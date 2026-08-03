@@ -13,6 +13,7 @@ datasette-edit-schema = "==0.7.1"
 "ruamel.yaml" = "==0.19.1"
 jsonschema = "==4.26.0"
 datasette-auth-passwords = "==1.1.1"
+datasette-mcp = "==0.1a0"
 
 [dev-packages]
 pytest = "==9.1.1"

@@ -107,6 +107,16 @@ One-time steps so `make explore` has a real, scoped `operator` identity instead 
    ```
 4. **Run once per new terminal**: `source make.sh && load_datasette_env` -- exports both as env vars for `make explore` to read.
 
+### Setup: MCP-connected ad hoc queries
+
+*Related: ADR-28*
+
+One-time step so an MCP client (e.g. Claude Code) can ask ad hoc natural-language questions against the live database instead of hand-writing SQL. `datasette-mcp` adds a read-only `/-/mcp` endpoint to the same `make explore` process -- no separate server, no extra port.
+
+1. With `make explore` running, register the endpoint once per client: `claude mcp add --transport http --scope local datasette http://localhost:8001/-/mcp`.
+2. The MCP session inherits whatever actor is logged into that browser session (`operator`, per [Setup: operator login](#setup-operator-login) above) -- `list_databases`/`get_database_schema`/`execute_sql` are gated by the same `execute-sql`/table permissions as everywhere else, and only ever read: no write tool exists in the plugin.
+3. This is a default-tool preference, not a permission boundary -- an MCP client with local shell access to this repo can still write to the database directly (e.g. via `sqlite3`); adopting MCP only makes the read-only path the habitual default for ad hoc queries.
+
 ### Setup: redacting sensitive fields
 
 *Related: ADR-04, ADR-27, REQ-013, REQ-018*

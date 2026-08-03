@@ -1,4 +1,5 @@
 import argparse
+import copy
 import csv
 import json
 import os
@@ -57,7 +58,7 @@ def _check_schema(conn, expected_columns, db_path):
         )
 
 
-def _load_extra_override_columns(config_path="datasette.yaml", name=None):
+def _load_extra_override_columns(config_path="datasette.local.yaml", name=None):
     """Per ADR-10 (Option 4) and ADR-22 (Option 1): override-only columns
     (present in an overrides table but not products) are declared durably
     in datasette.yaml, not inferred from a live database inspection --
@@ -79,7 +80,7 @@ def _load_extra_override_columns(config_path="datasette.yaml", name=None):
     return (tables.get(table) or {}).get("x-overrides-extra-columns") or []
 
 
-def _load_extra_overrides_tables(config_path="datasette.yaml"):
+def _load_extra_overrides_tables(config_path="datasette.local.yaml"):
     """Per ADR-20 (Option 2): names of ADDITIONAL overrides tables beyond
     the implicit primary one. Primary stays products_overrides/
     products_merged, completely unchanged -- no rename, no migration, no
@@ -90,6 +91,20 @@ def _load_extra_overrides_tables(config_path="datasette.yaml"):
     with open(config_path) as f:
         config = _yaml.load(f) or {}
     return config.get("x-overrides-tables") or []
+
+
+def _load_overrides_defaults(config_path="datasette.local.yaml"):
+    """Per ADR-29 (Option 1): a shared defaults block every declared
+    overrides table inherits (e.g. the operator-scoped permissions grant),
+    so a new table doesn't need its own copy-pasted block. Table-specific
+    content (like x-overrides-extra-columns, which varies per table with
+    no common base today) is NOT part of this -- only keys with a real,
+    evidenced common value across every declared table belong here."""
+    if not os.path.exists(config_path):
+        return {}
+    with open(config_path) as f:
+        config = _yaml.load(f) or {}
+    return config.get("x-overrides-defaults") or {}
 
 
 def _ensure_overrides(conn, columns, name=None):
@@ -145,99 +160,105 @@ def _ensure_overrides(conn, columns, name=None):
     )
 
 
-def _generate_overrides_queries(columns, config_path="datasette.yaml"):
-    """Per ADR-20 (Option 2): writes canned write-queries per declared extra
-    overrides table into datasette.yaml, via ruamel.yaml's round-trip mode
-    -- structural mutation of the parsed config, not a plain-text marker
-    splice. ruamel preserves every comment, key order, and the
-    hand-authored `copy-to-overrides` query's block-scalar formatting
-    untouched (confirmed live against this file); plain PyYAML's
-    safe_load()+dump() strips all of that (also confirmed live).
+def _generate_overrides_queries(
+    columns,
+    local_path="datasette.local.yaml",
+    generated_path="datasette.generated.yaml",
+):
+    """Per ADR-29 (Option 1): datasette.generated.yaml is 100% transform-
+    owned, rewritten wholesale every run -- unlike the pre-ADR-29 single-file
+    round-trip approach, there is no hand-authored content in this file to
+    preserve, so a fresh dict is safe to build and dump each time. Table
+    declarations (`x-overrides-tables`, `x-overrides-extra-columns`) and the
+    shared permissions default (`x-overrides-defaults`) are read from the
+    operator-owned datasette.local.yaml; `_merge_datasette_config` combines
+    this file with that one into the real datasette.yaml before Datasette
+    ever reads it.
 
-    Two query kinds, both keyed off the same per-table config: a
-    `copy-to-overrides-<name>` (always) and, only when that table declares
-    `x-overrides-extra-columns`, a `backfill-null-extra-columns-<name>`
-    (COALESCE-backfills existing rows' NULLs left by an ad hoc
-    `datasette-edit-schema` column add -- config-declared columns already
-    get their DEFAULT '' at ALTER TABLE time via `_ensure_overrides`, per
-    REQ-024; this covers the UI-added path that doesn't). Generated
-    entries are identified by their `copy-to-overrides-`/
-    `backfill-null-extra-columns-` prefixes (a bare `copy-to-overrides` key
-    never matches either) -- any such key not matching the current
-    declared-names list, or (for backfill) no longer having extra columns,
-    is removed each run, so renaming/removing a declared table or its
-    extra columns cleans up after itself, not just adding new ones."""
-    names = _load_extra_overrides_tables(config_path)
+    Two query kinds per declared table: `copy-to-overrides-<name>` (always)
+    and, only when that table declares `x-overrides-extra-columns`, a
+    `backfill-null-extra-columns-<name>` (COALESCE-backfills existing rows'
+    NULLs left by an ad hoc `datasette-edit-schema` column add -- REQ-024
+    only backfills the config-declared ALTER TABLE path)."""
+    names = _load_extra_overrides_tables(local_path)
+    default_permissions = _load_overrides_defaults(local_path).get("permissions")
     override_cols = [c for c in columns if c != "last_updated"]
     col_csv = ", ".join(override_cols)
 
-    if not os.path.exists(config_path):
-        return
-    with open(config_path) as f:
-        raw_config_text = f.read()
-    config = _yaml.load(raw_config_text) or {}
-
-    products_map = config.get("databases", {}).get("products", {})
-    queries = products_map.get("queries")
-    if queries is None:
-        return  # no queries section to generate into -- nothing to do
-
-    tables = products_map.get("tables")
-    if tables is not None:
-        for name in names:
-            table = f"products_overrides_{name}"
-            if table not in tables:
-                tables[table] = {}
-            tables[table].setdefault("permissions", {
-                "insert-row": {"id": "operator"},
-                "update-row": {"id": "operator"},
-                "delete-row": {"id": "operator"},
-            })
-
-    for key in [k for k in queries if k.startswith("copy-to-overrides-")]:
-        if key[len("copy-to-overrides-"):] not in names:
-            del queries[key]
-    for key in [k for k in queries if k.startswith("backfill-null-extra-columns-")]:
-        if key[len("backfill-null-extra-columns-"):] not in names:
-            del queries[key]
-
+    queries = {}
+    tables = {}
     for name in names:
+        table = f"products_overrides_{name}"
         queries[f"copy-to-overrides-{name}"] = {
             "sql": LiteralScalarString(
-                f"INSERT INTO products_overrides_{name} ({col_csv})\n"
+                f"INSERT INTO {table} ({col_csv})\n"
                 f"SELECT {col_csv} FROM products WHERE id = :id\n"
                 "ON CONFLICT(id) DO NOTHING"
             ),
             "write": True,
-            "on_success_redirect": f"/products/products_overrides_{name}",
+            "on_success_redirect": f"/products/{table}",
         }
-        extra_cols = _load_extra_override_columns(config_path, name=name)
+        extra_cols = _load_extra_override_columns(local_path, name=name)
         if extra_cols:
             queries[f"backfill-null-extra-columns-{name}"] = {
                 "sql": LiteralScalarString(
-                    f"UPDATE products_overrides_{name} SET\n"
+                    f"UPDATE {table} SET\n"
                     + ",\n".join(f"  {c} = COALESCE({c}, '')" for c in extra_cols)
                 ),
                 "write": True,
-                "on_success_redirect": f"/products/products_overrides_{name}",
+                "on_success_redirect": f"/products/{table}",
             }
-        else:
-            queries.pop(f"backfill-null-extra-columns-{name}", None)
+        if default_permissions:
+            tables[table] = {"permissions": copy.deepcopy(default_permissions)}
 
-    # REQ-034: mark the generated block so a reader inspecting datasette.yaml
-    # directly doesn't mistake it for hand-authored/hand-duplicated config.
-    # Guarded: yaml_set_comment_before_after_key appends rather than replaces
-    # on repeat calls, so re-setting it unconditionally would duplicate the
-    # comment on every `make transform` run.
-    if "Generated by make transform (ADR-20)" not in raw_config_text:
-        products_map.yaml_set_comment_before_after_key(
-            "queries",
-            before='Generated by make transform (ADR-20) -- do not '
-            'hand-edit, see README "declaring an extra overrides table"',
+    generated = {"databases": {"products": {"queries": queries, "tables": tables}}}
+    with open(generated_path, "w") as f:
+        f.write(
+            "# Generated by make transform (ADR-29) -- do not hand-edit,\n"
+            '# see README "declaring an extra overrides table"\n'
         )
+        _yaml.dump(generated, f)
 
-    with open(config_path, "w") as f:
-        _yaml.dump(config, f)
+
+def _deep_merge(base, overlay):
+    """Recursive merge: matching dict keys merge recursively, matching list
+    values concatenate (base's items first, then overlay's), anything else
+    keeps overlay's value. Used to combine datasette.generated.yaml (base)
+    with datasette.local.yaml (overlay, operator-authored so it wins any
+    scalar conflict) into the real datasette.yaml."""
+    if isinstance(base, dict) and isinstance(overlay, dict):
+        result = dict(base)
+        for key, overlay_val in overlay.items():
+            result[key] = (
+                _deep_merge(base[key], overlay_val) if key in base else overlay_val
+            )
+        return result
+    if isinstance(base, list) and isinstance(overlay, list):
+        return base + overlay
+    return overlay
+
+
+def _merge_datasette_config(
+    generated_path="datasette.generated.yaml",
+    local_path="datasette.local.yaml",
+    output_path="datasette.yaml",
+):
+    """Per ADR-29 (Option 1): datasette.yaml is a derived artifact, combined
+    from the transform-owned generated file and the operator-owned local
+    file every time either could have changed -- once at the end of
+    `make transform`, and again at the start of `make explore` in case
+    datasette.local.yaml was hand-edited since the last transform run."""
+    generated = {}
+    if os.path.exists(generated_path):
+        with open(generated_path) as f:
+            generated = _yaml.load(f) or {}
+    local = {}
+    if os.path.exists(local_path):
+        with open(local_path) as f:
+            local = _yaml.load(f) or {}
+    merged = _deep_merge(generated, local)
+    with open(output_path, "w") as f:
+        _yaml.dump(merged, f)
 
 
 def load_products(input_path, db_path):
@@ -287,6 +308,7 @@ def load_products(input_path, db_path):
     for name in _load_extra_overrides_tables():
         _ensure_overrides(conn, columns, name)
     _generate_overrides_queries(columns)
+    _merge_datasette_config()
     conn.commit()
     conn.close()
 
@@ -316,7 +338,18 @@ def main(argv=None):
     parser.add_argument("input_path", nargs="?", default=None)
     parser.add_argument("--db-path", default="data/products.db")
     parser.add_argument("--input-dir", default="input")
+    parser.add_argument(
+        "--merge-only",
+        action="store_true",
+        help="Per ADR-29: only re-merge datasette.generated.yaml + "
+        "datasette.local.yaml into datasette.yaml, skip loading data. "
+        "Run before `make explore` in case datasette.local.yaml was "
+        "hand-edited since the last `make transform`.",
+    )
     args = parser.parse_args(argv)
+    if args.merge_only:
+        _merge_datasette_config()
+        return
     input_path = args.input_path or _pick_input_file(args.input_dir)
     os.makedirs(os.path.dirname(args.db_path), exist_ok=True)
     load_products(input_path, args.db_path)

@@ -68,6 +68,7 @@ build:
 	pipenv run python -m app.build --source-table $(SOURCE_TABLE)
 
 explore:
+	pipenv run python -m app.transform --merge-only
 	pipenv run datasette $(DB_PATH) -c datasette.yaml --secret $(DATASETTE_SECRET) --plugins-dir=plugins/ -o
 
 sync-sheets:

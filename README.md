@@ -25,7 +25,7 @@ The pipeline runs as a straight line, `transform` → `explore` → `build` → 
 
 1. Run `make explore` (after the one-time [operator login setup](#setup-operator-login) below):
    - Opens a login page in your browser -- log in as `operator` with the password from that setup's step 1.
-   - Without this you're browsing anonymously: `products` is explicitly locked read-only in `datasette.yaml`, and `products_overrides` only grants write access to `operator`, so the write-UI's Edit/Insert buttons won't work.
+   - Without this you're browsing anonymously: `products` is explicitly locked read-only in `datasette.local.yaml`, and `products_overrides` only grants write access to `operator`, so the write-UI's Edit/Insert buttons won't work.
    - The login cookie persists across `make explore` restarts as long as the browser stays open (no expiry is set on it) -- only fully closing the browser forces logging in again.
 2. Open the `copy-to-overrides` canned query (Queries page) and submit the product's `id`. This copies that row into `products_overrides`, all columns NULL except what was copied -- `products` itself is never written to.
 3. You're redirected to `products_overrides` -- click **Edit** on the copied row (via `datasette-write-ui`) and correct the fields you need. The correction persists across future `transform` re-runs.
@@ -45,33 +45,34 @@ The pipeline runs as a straight line, `transform` → `explore` → `build` → 
 
 ## Usage: declaring an extra overrides table
 
-*Related: ADR-20*
+*Related: ADR-20, ADR-29*
 
 Not a one-time setup step -- repeat this whenever you want another independent correction set against `products`, e.g. a second reviewer.
 
-1. Add the table's name to `datasette.yaml`'s `x-overrides-tables` list (create the key if it doesn't exist yet):
+1. Add the table's name to `datasette.local.yaml`'s `x-overrides-tables` list (create the key if it doesn't exist yet):
    ```yaml
    x-overrides-tables:
      - reviewer_b
    ```
 2. Run `make transform` (or `python -m app.transform`):
    - Creates `products_overrides_reviewer_b` and `products_merged_reviewer_b`.
-   - Generates a `copy-to-overrides-reviewer_b` canned write-query in `datasette.yaml` -- gives that table the same one-click "copy from products" convenience the primary table has, via `make explore`'s write-UI.
+   - Generates a `copy-to-overrides-reviewer_b` canned write-query and a `tables.products_overrides_reviewer_b.permissions` block (per `x-overrides-defaults.permissions`) into `datasette.generated.yaml`, then merges it with `datasette.local.yaml` into `datasette.yaml` -- the file Datasette actually reads.
+   - Every declared table inherits the same permissions grant from `datasette.local.yaml`'s `x-overrides-defaults.permissions` automatically -- no per-table permissions block to hand-write or copy-paste.
 3. If `explore` is already running:
-   - No restart needed for the new table or its canned query -- both are picked up live (ADR-25).
-   - A restart is only needed if you also want to grant the new table write permissions (a `tables.products_overrides_reviewer_b.permissions` block, not generated automatically -- add it by hand, matching the shape REQ-023 added for the primary table).
+   - No restart needed for the new table, its canned query, or its permissions -- all picked up live (ADR-25), since `make transform` already re-merged `datasette.yaml`.
+   - If you only edited `datasette.local.yaml` (no data change, so no `make transform` run), run `pipenv run python -m app.transform --merge-only` to re-merge before restarting `explore` -- `make explore` does this automatically at startup, but a running session won't pick up a local-only edit until restarted.
 4. To remove a declared table: delete its entry from `x-overrides-tables`, then run `make transform` again:
-   - The generated canned query is cleaned up automatically.
-   - **The underlying `products_overrides_<name>`/`products_merged_<name>` table and view are NOT dropped** -- only the canned query goes away.
+   - The generated canned query and permissions block are cleaned up automatically.
+   - **The underlying `products_overrides_<name>`/`products_merged_<name>` table and view are NOT dropped** -- only the generated config goes away.
    - Undeclaring a table never destroys its data; re-declaring the same name later picks the existing table back up.
 
 ## Usage: declaring an extra override-only column
 
-*Related: ADR-10, ADR-22*
+*Related: ADR-10, ADR-22, ADR-29*
 
 Not a one-time setup step -- repeat whenever a correction needs a field `products` doesn't have (e.g. `sold_remarks`).
 
-1. Add the column's name under that overrides table's own `x-overrides-extra-columns` list, nested under `databases.products.tables.<table_name>` (create the key path if it doesn't exist yet). For the primary table, `<table_name>` is `products_overrides`; for a table declared via `x-overrides-tables` (ADR-20), it's `products_overrides_<name>`:
+1. Add the column's name under that overrides table's own `x-overrides-extra-columns` list, nested under `databases.products.tables.<table_name>`, in `datasette.local.yaml` (create the key path if it doesn't exist yet). For the primary table, `<table_name>` is `products_overrides`; for a table declared via `x-overrides-tables` (ADR-20), it's `products_overrides_<name>`:
    ```yaml
    databases:
      products:
@@ -80,18 +81,28 @@ Not a one-time setup step -- repeat whenever a correction needs a field `product
            x-overrides-extra-columns:
            - sold_remarks
    ```
-   - A column declared under one table is never applied to another -- each table's list is independent.
+   - A column declared under one table is never applied to another -- each table's list is independent. No shared default exists for this list today (unlike permissions) since real tables' extra columns don't share a common base.
 2. Run `make transform` (or `python -m app.transform`):
    - Adds the column to that one table via `ALTER TABLE`, defaulting existing rows to `''` (not `NULL` -- `datasette-write-ui`'s edit form errors on a `NULL`-valued field).
    - Rebuilds that table's merged view to include it.
 3. If `explore` is already running, no restart needed -- Datasette reads table columns live from the database on every request, not from a startup snapshot.
 4. Adding a column via `datasette-edit-schema`'s own schema-editing UI instead of this config list works too, but:
    - Existing rows are left `NULL` (no default-value option in that UI), and the same `NULL`-crashes-the-edit-form error applies until backfilled. Once the column is also added to `x-overrides-extra-columns` (step 1) and `make transform` has run (step 2), a matching `backfill-null-extra-columns-<table_name>` canned query is generated automatically -- run it once from that table's page to clear every `NULL` to `''`.
-   - Prefer the config-declared route instead: it survives a schema-recovery rebuild (ADR-08) and a fresh checkout; an ad hoc UI-added column doesn't.
+   - Prefer the config-declared route instead of the ad hoc UI-added one: it survives a schema-recovery rebuild (ADR-08), though not a fresh checkout since ADR-29 -- see [Setup: local Datasette config](#setup-local-datasette-config).
 
 ## Maintainer setup
 
 One-time infra/ops setup, not part of the day-to-day operator workflow above.
+
+### Setup: local Datasette config
+
+*Related: ADR-29*
+
+One-time step on a fresh checkout. `datasette.local.yaml` (the operator-owned half of the config split -- table/permission declarations, `x-overrides-defaults`, the auth-passwords plugin block) is gitignored, same as `data/products.approved` and the `lpass`-stored secrets below -- it never survives a fresh checkout on its own. `datasette.generated.yaml` and the merged `datasette.yaml` are also gitignored, since both are fully regenerable from `datasette.local.yaml` + `make transform`.
+
+1. Copy the tracked template: `cp datasette.local.yaml.example datasette.local.yaml`.
+2. Edit it to match your own declared overrides tables/columns if this isn't the first checkout on this machine -- the template only carries the primary table's config, no extras declared.
+3. Run `make transform` (or `pipenv run python -m app.transform --merge-only` if you just want to regenerate `datasette.yaml` without reloading data) to produce the merged `datasette.yaml` before `make explore`.
 
 ### Setup: operator login
 

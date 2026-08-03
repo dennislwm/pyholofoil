@@ -328,11 +328,11 @@ def test_products_merged_shows_row_deleted_from_products_but_present_in_override
 
 
 def test_config_declared_override_column_appears_in_merged_view(tmp_path, monkeypatch):
-    """Per ADR-10 (Option 4): a column declared in datasette.yaml's
+    """Per ADR-10 (Option 4): a column declared in datasette.local.yaml's
     x-overrides-extra-columns is added to products_overrides and shows up
     in products_merged, even though products itself has no such column."""
     monkeypatch.chdir(tmp_path)
-    (tmp_path / "datasette.yaml").write_text(
+    (tmp_path / "datasette.local.yaml").write_text(
         "databases:\n  products:\n    tables:\n      products_overrides:\n"
         "        x-overrides-extra-columns:\n        - operator_notes\n"
     )
@@ -365,13 +365,13 @@ def test_config_declared_columns_accumulate_across_runs(tmp_path, monkeypatch):
     json_path = tmp_path / "shiny.json"
     json_path.write_text(json.dumps([{"id": "aaa", "product_name": "X"}]))
 
-    (tmp_path / "datasette.yaml").write_text(
+    (tmp_path / "datasette.local.yaml").write_text(
         "databases:\n  products:\n    tables:\n      products_overrides:\n"
         "        x-overrides-extra-columns:\n        - field_one\n"
     )
     load_products(str(json_path), str(db_path))
 
-    (tmp_path / "datasette.yaml").write_text(
+    (tmp_path / "datasette.local.yaml").write_text(
         "databases:\n  products:\n    tables:\n      products_overrides:\n"
         "        x-overrides-extra-columns:\n        - field_one\n        - field_two\n"
     )
@@ -398,7 +398,7 @@ def test_config_declared_extra_column_defaults_existing_rows_to_empty_string(
     json_path = tmp_path / "shiny.json"
     json_path.write_text(json.dumps([{"id": "aaa", "product_name": "X"}]))
 
-    (tmp_path / "datasette.yaml").write_text("")
+    (tmp_path / "datasette.local.yaml").write_text("")
     load_products(str(json_path), str(db_path))
 
     conn = sqlite3.connect(str(db_path))
@@ -408,7 +408,7 @@ def test_config_declared_extra_column_defaults_existing_rows_to_empty_string(
     conn.commit()
     conn.close()
 
-    (tmp_path / "datasette.yaml").write_text(
+    (tmp_path / "datasette.local.yaml").write_text(
         "databases:\n  products:\n    tables:\n      products_overrides:\n"
         "        x-overrides-extra-columns:\n        - sold_remarks\n"
     )
@@ -427,7 +427,7 @@ def test_ensure_overrides_extra_column_creation_is_idempotent(tmp_path, monkeypa
     """SQLite's ALTER TABLE ADD COLUMN has no IF NOT EXISTS -- a second
     transform run declaring the same config column must not error."""
     monkeypatch.chdir(tmp_path)
-    (tmp_path / "datasette.yaml").write_text(
+    (tmp_path / "datasette.local.yaml").write_text(
         "databases:\n  products:\n    tables:\n      products_overrides:\n"
         "        x-overrides-extra-columns:\n        - operator_notes\n"
     )
@@ -454,7 +454,7 @@ def test_extra_column_declared_for_one_table_does_not_leak_to_another(
     declared column to every table, and this already corrupted the live
     products_overrides table with sold-only columns."""
     monkeypatch.chdir(tmp_path)
-    (tmp_path / "datasette.yaml").write_text(
+    (tmp_path / "datasette.local.yaml").write_text(
         "databases:\n  products:\n    tables:\n      products_overrides_sold:\n"
         "        x-overrides-extra-columns:\n        - sold_remarks\n"
         "x-overrides-tables:\n  - sold\n"
@@ -479,7 +479,7 @@ def test_extra_overrides_table_gets_independent_table_and_view(tmp_path, monkeyp
     products_overrides_<name> table and products_merged_<name> view,
     independent of the primary (unsuffixed) pair."""
     monkeypatch.chdir(tmp_path)
-    (tmp_path / "datasette.yaml").write_text("x-overrides-tables:\n  - reviewer_b\n")
+    (tmp_path / "datasette.local.yaml").write_text("x-overrides-tables:\n  - reviewer_b\n")
     db_path = tmp_path / "products.db"
     json_path = tmp_path / "shiny.json"
     json_path.write_text(json.dumps([{"id": "aaa", "product_name": "X"}]))
@@ -510,7 +510,7 @@ def test_extra_overrides_table_creation_is_idempotent(tmp_path, monkeypatch):
     guarantee the primary table already has, extended to a declared
     extra one."""
     monkeypatch.chdir(tmp_path)
-    (tmp_path / "datasette.yaml").write_text("x-overrides-tables:\n  - reviewer_b\n")
+    (tmp_path / "datasette.local.yaml").write_text("x-overrides-tables:\n  - reviewer_b\n")
     db_path = tmp_path / "products.db"
     json_path = tmp_path / "shiny.json"
     json_path.write_text(json.dumps([{"id": "aaa", "product_name": "X"}]))
@@ -539,7 +539,7 @@ def test_primary_overrides_table_names_unchanged_when_extra_tables_declared(
     -- build.py/sync_sheets.py/Makefile default to the literal
     'products_merged' name and must keep working unmodified."""
     monkeypatch.chdir(tmp_path)
-    (tmp_path / "datasette.yaml").write_text("x-overrides-tables:\n  - reviewer_b\n")
+    (tmp_path / "datasette.local.yaml").write_text("x-overrides-tables:\n  - reviewer_b\n")
     db_path = tmp_path / "products.db"
     json_path = tmp_path / "shiny.json"
     json_path.write_text(json.dumps([{"id": "aaa", "product_name": "X"}]))
@@ -558,17 +558,16 @@ def test_primary_overrides_table_names_unchanged_when_extra_tables_declared(
     assert {"products_overrides", "products_merged"}.issubset(tables)
 
 
-def test_generate_overrides_queries_preserves_hand_authored_content(
-    tmp_path, monkeypatch
-):
-    """Per ADR-20: the generator mutates the parsed config structurally via
-    ruamel.yaml's round-trip mode, never a plain yaml.safe_load()+dump()
-    (confirmed live: that round-trip strips every comment and reorders
-    keys in the real datasette.yaml). A hand-written comment and the
-    existing copy-to-overrides query must both survive generation
-    untouched, and the new entry must appear alongside them."""
+def test_declaring_extra_table_leaves_local_config_untouched(tmp_path, monkeypatch):
+    """Per ADR-29 (Option 1): datasette.local.yaml is 100% operator-owned
+    and never rewritten by transform -- unlike the pre-ADR-29 single-file
+    round-trip approach (which needed ruamel's comment-preserving mutation
+    to avoid clobbering hand-authored content), the new split makes this
+    trivial: local.yaml is only ever read, never written, so a hand-written
+    comment survives byte-for-byte. Generated content (the new table's
+    canned query) appears in the merged datasette.yaml instead."""
     monkeypatch.chdir(tmp_path)
-    (tmp_path / "datasette.yaml").write_text(
+    local_text = (
         "databases:\n"
         "  products:\n"
         "    queries:\n"
@@ -579,34 +578,39 @@ def test_generate_overrides_queries_preserves_hand_authored_content(
         "x-overrides-tables:\n"
         "  - reviewer_b\n"
     )
+    (tmp_path / "datasette.local.yaml").write_text(local_text)
     db_path = tmp_path / "products.db"
     json_path = tmp_path / "shiny.json"
     json_path.write_text(json.dumps([{"id": "aaa", "product_name": "X"}]))
 
     load_products(str(json_path), str(db_path))
 
-    out = (tmp_path / "datasette.yaml").read_text()
+    assert (tmp_path / "datasette.local.yaml").read_text() == local_text
 
-    assert "# hand-authored, never touched" in out
-    assert "copy-to-overrides:" in out
-    assert "copy-to-overrides-reviewer_b:" in out
-    assert "products_overrides_reviewer_b" in out
-    assert "on_success_redirect: /products/products_overrides_reviewer_b" in out
+    merged = (tmp_path / "datasette.yaml").read_text()
+    assert "# hand-authored, never touched" in merged
+    assert "copy-to-overrides:" in merged
+    assert "copy-to-overrides-reviewer_b:" in merged
+    assert "products_overrides_reviewer_b" in merged
+    assert "on_success_redirect: /products/products_overrides_reviewer_b" in merged
 
 
 def test_generate_overrides_queries_adds_table_permissions(tmp_path, monkeypatch):
-    """A declared overrides table must get the same operator-scoped
-    insert/update/delete-row permissions as the hand-authored ones (e.g.
-    products_overrides_sold) -- the generator must not produce a table
-    that's writable via canned query but has no row-permission gate."""
+    """A declared overrides table must inherit x-overrides-defaults'
+    permissions block -- the generator must not produce a table that's
+    writable via canned query but has no row-permission gate."""
     monkeypatch.chdir(tmp_path)
-    (tmp_path / "datasette.yaml").write_text(
-        "databases:\n"
-        "  products:\n"
-        "    queries: {}\n"
-        "    tables: {}\n"
+    (tmp_path / "datasette.local.yaml").write_text(
         "x-overrides-tables:\n"
         "  - reviewer_b\n"
+        "x-overrides-defaults:\n"
+        "  permissions:\n"
+        "    insert-row:\n"
+        "      id: operator\n"
+        "    update-row:\n"
+        "      id: operator\n"
+        "    delete-row:\n"
+        "      id: operator\n"
     )
     db_path = tmp_path / "products.db"
     json_path = tmp_path / "shiny.json"
@@ -614,7 +618,7 @@ def test_generate_overrides_queries_adds_table_permissions(tmp_path, monkeypatch
 
     load_products(str(json_path), str(db_path))
 
-    out = (tmp_path / "datasette.yaml").read_text()
+    out = (tmp_path / "datasette.generated.yaml").read_text()
     assert "products_overrides_reviewer_b:" in out
     idx = out.index("products_overrides_reviewer_b:")
     table_block = out[idx:idx + 200]
@@ -628,8 +632,7 @@ def test_generate_overrides_queries_is_idempotent(tmp_path, monkeypatch):
     """Running load_products twice with the same declared tables must not
     duplicate the generated canned-query entry."""
     monkeypatch.chdir(tmp_path)
-    (tmp_path / "datasette.yaml").write_text(
-        "databases:\n  products:\n    queries: {}\n"
+    (tmp_path / "datasette.local.yaml").write_text(
         "x-overrides-tables:\n  - reviewer_b\n"
     )
     db_path = tmp_path / "products.db"
@@ -637,9 +640,9 @@ def test_generate_overrides_queries_is_idempotent(tmp_path, monkeypatch):
     json_path.write_text(json.dumps([{"id": "aaa", "product_name": "X"}]))
 
     load_products(str(json_path), str(db_path))
-    first = (tmp_path / "datasette.yaml").read_text()
+    first = (tmp_path / "datasette.generated.yaml").read_text()
     load_products(str(json_path), str(db_path))
-    second = (tmp_path / "datasette.yaml").read_text()
+    second = (tmp_path / "datasette.generated.yaml").read_text()
 
     assert first == second
     assert second.count("copy-to-overrides-reviewer_b:") == 1
@@ -650,22 +653,20 @@ def test_generate_overrides_queries_removes_undeclared_entries(tmp_path, monkeyp
     its generated canned query must be removed too, not left behind
     pointing at a table that may no longer exist."""
     monkeypatch.chdir(tmp_path)
-    yaml_path = tmp_path / "datasette.yaml"
-    yaml_path.write_text(
-        "databases:\n  products:\n    queries: {}\n"
-        "x-overrides-tables:\n  - reviewer_b\n"
-    )
+    local_path = tmp_path / "datasette.local.yaml"
+    generated_path = tmp_path / "datasette.generated.yaml"
+    local_path.write_text("x-overrides-tables:\n  - reviewer_b\n")
     db_path = tmp_path / "products.db"
     json_path = tmp_path / "shiny.json"
     json_path.write_text(json.dumps([{"id": "aaa", "product_name": "X"}]))
 
     load_products(str(json_path), str(db_path))
-    assert "copy-to-overrides-reviewer_b:" in yaml_path.read_text()
+    assert "copy-to-overrides-reviewer_b:" in generated_path.read_text()
 
-    yaml_path.write_text("databases:\n  products:\n    queries: {}\n")
+    local_path.write_text("")
     load_products(str(json_path), str(db_path))
 
-    assert "copy-to-overrides-reviewer_b:" not in yaml_path.read_text()
+    assert "copy-to-overrides-reviewer_b:" not in generated_path.read_text()
 
 
 def test_generate_backfill_query_for_table_with_extra_columns(tmp_path, monkeypatch):
@@ -675,10 +676,9 @@ def test_generate_backfill_query_for_table_with_extra_columns(tmp_path, monkeypa
     datasette-edit-schema column add (REQ-024 only backfills the
     config-declared ALTER TABLE path)."""
     monkeypatch.chdir(tmp_path)
-    (tmp_path / "datasette.yaml").write_text(
+    (tmp_path / "datasette.local.yaml").write_text(
         "databases:\n"
         "  products:\n"
-        "    queries: {}\n"
         "    tables:\n"
         "      products_overrides_sold:\n"
         "        x-overrides-extra-columns:\n"
@@ -692,7 +692,7 @@ def test_generate_backfill_query_for_table_with_extra_columns(tmp_path, monkeypa
 
     load_products(str(json_path), str(db_path))
 
-    out = (tmp_path / "datasette.yaml").read_text()
+    out = (tmp_path / "datasette.generated.yaml").read_text()
 
     assert "backfill-null-extra-columns-sold:" in out
     assert "date_sold = COALESCE(date_sold, '')" in out
@@ -705,11 +705,11 @@ def test_generate_backfill_query_removed_when_extra_columns_cleared(tmp_path, mo
     have its stale backfill query removed, not left pointing at columns
     that are no longer config-declared."""
     monkeypatch.chdir(tmp_path)
-    yaml_path = tmp_path / "datasette.yaml"
-    yaml_path.write_text(
+    local_path = tmp_path / "datasette.local.yaml"
+    generated_path = tmp_path / "datasette.generated.yaml"
+    local_path.write_text(
         "databases:\n"
         "  products:\n"
-        "    queries: {}\n"
         "    tables:\n"
         "      products_overrides_sold:\n"
         "        x-overrides-extra-columns:\n"
@@ -721,29 +721,86 @@ def test_generate_backfill_query_removed_when_extra_columns_cleared(tmp_path, mo
     json_path.write_text(json.dumps([{"id": "aaa", "product_name": "X"}]))
 
     load_products(str(json_path), str(db_path))
-    assert "backfill-null-extra-columns-sold:" in yaml_path.read_text()
+    assert "backfill-null-extra-columns-sold:" in generated_path.read_text()
 
-    yaml_path.write_text(
-        "databases:\n  products:\n    queries: {}\nx-overrides-tables:\n  - sold\n"
-    )
+    local_path.write_text("x-overrides-tables:\n  - sold\n")
     load_products(str(json_path), str(db_path))
 
-    assert "backfill-null-extra-columns-sold:" not in yaml_path.read_text()
+    assert "backfill-null-extra-columns-sold:" not in generated_path.read_text()
 
 
-def test_generate_overrides_queries_noop_without_queries_section(tmp_path, monkeypatch):
-    """A datasette.yaml with no databases.products.queries section (e.g. a
-    fresh checkout predating ADR-20) must not error and must not invent
-    the section."""
+def test_generate_overrides_queries_noop_without_declared_tables(tmp_path, monkeypatch):
+    """No datasette.local.yaml at all (e.g. a fresh checkout before the
+    operator has copied the template) must not error and must generate an
+    empty queries/tables block, not invent a declared table."""
     monkeypatch.chdir(tmp_path)
-    (tmp_path / "datasette.yaml").write_text("x-overrides-tables:\n  - reviewer_b\n")
     db_path = tmp_path / "products.db"
     json_path = tmp_path / "shiny.json"
     json_path.write_text(json.dumps([{"id": "aaa", "product_name": "X"}]))
 
     load_products(str(json_path), str(db_path))  # must not raise
 
-    assert "copy-to-overrides-reviewer_b" not in (tmp_path / "datasette.yaml").read_text()
+    assert "copy-to-overrides-reviewer_b" not in (
+        tmp_path / "datasette.generated.yaml"
+    ).read_text()
+
+
+def test_merge_datasette_config_combines_generated_and_local(tmp_path, monkeypatch):
+    """Per ADR-29 (Option 1): the merge step must combine both files --
+    dict keys merge recursively (a table declared in local with only
+    x-overrides-extra-columns and in generated with only permissions ends
+    up with both), list keys concatenate."""
+    monkeypatch.chdir(tmp_path)
+    (tmp_path / "datasette.generated.yaml").write_text(
+        "databases:\n"
+        "  products:\n"
+        "    tables:\n"
+        "      products_overrides_sold:\n"
+        "        permissions:\n"
+        "          insert-row:\n"
+        "            id: operator\n"
+    )
+    (tmp_path / "datasette.local.yaml").write_text(
+        "databases:\n"
+        "  products:\n"
+        "    tables:\n"
+        "      products_overrides_sold:\n"
+        "        x-overrides-extra-columns:\n"
+        "        - sold_remarks\n"
+        "x-overrides-tables:\n"
+        "  - sold\n"
+    )
+
+    from app.transform import _merge_datasette_config
+
+    _merge_datasette_config()
+
+    out = (tmp_path / "datasette.yaml").read_text()
+    assert "insert-row:" in out
+    assert "sold_remarks" in out
+    assert "x-overrides-tables:" in out
+    assert "- sold" in out
+
+
+def test_merge_datasette_config_is_idempotent(tmp_path, monkeypatch):
+    """Running the merge twice on unchanged inputs must produce byte-
+    identical output."""
+    monkeypatch.chdir(tmp_path)
+    (tmp_path / "datasette.generated.yaml").write_text(
+        "databases:\n  products:\n    queries: {}\n"
+    )
+    (tmp_path / "datasette.local.yaml").write_text(
+        "x-overrides-tables: []\n"
+    )
+
+    from app.transform import _merge_datasette_config
+
+    _merge_datasette_config()
+    first = (tmp_path / "datasette.yaml").read_text()
+    _merge_datasette_config()
+    second = (tmp_path / "datasette.yaml").read_text()
+
+    assert first == second
 
 
 def test_load_products_refuses_record_missing_id(tmp_path, monkeypatch):

@@ -123,7 +123,7 @@ def test_copy_to_overrides_sold_column_list_matches_products_overrides_sold_sche
     }
     input_path = tmp_path / "shiny.json"
     input_path.write_text(json.dumps([record]))
-    (tmp_path / "datasette.yaml").write_text("x-overrides-tables:\n- sold\n")
+    (tmp_path / "datasette.local.yaml").write_text("x-overrides-tables:\n- sold\n")
     load_products(str(input_path), str(db_path))
 
     conn = sqlite3.connect(str(db_path))

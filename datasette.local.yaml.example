@@ -1,0 +1,51 @@
+databases:
+  products:
+    queries:
+      copy-to-overrides:
+        sql: |-
+          INSERT INTO products_overrides (
+            id, product_name, set_name, brand_name, discriminator, rarity,
+            quantity, value_total, value_per_unit, value_currency,
+            paid_total, paid_per_unit, paid_currency, grade_type,
+            grade_subtype, group_name, group_wishlist, tcgplayer_id,
+            pricecharting_id, doubleholo_id, date_added, tag
+          )
+          SELECT
+            id, product_name, set_name, brand_name, discriminator, rarity,
+            quantity, value_total, value_per_unit, value_currency,
+            paid_total, paid_per_unit, paid_currency, grade_type,
+            grade_subtype, group_name, group_wishlist, tcgplayer_id,
+            pricecharting_id, doubleholo_id, date_added, tag
+          FROM products WHERE id = :id
+          ON CONFLICT(id) DO NOTHING
+        write: true
+        on_success_redirect: /products/products_overrides
+    tables:
+      products:
+        permissions:
+          insert-row: false
+          update-row: false
+          delete-row: false
+          alter-table: false
+          drop-table: false
+      products_overrides:
+        permissions:
+          insert-row:
+            id: operator
+          update-row:
+            id: operator
+          delete-row:
+            id: operator
+x-overrides-tables: []
+x-overrides-defaults:
+  permissions:
+    insert-row:
+      id: operator
+    update-row:
+      id: operator
+    delete-row:
+      id: operator
+plugins:
+  datasette-auth-passwords:
+    operator_password_hash:
+      $env: DATASETTE_OPERATOR_PASSWORD_HASH

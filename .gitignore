@@ -4,4 +4,7 @@ __pycache__/
 data/
 input/
 docs/
+datasette.local.yaml
+datasette.generated.yaml
+datasette.yaml
 .DS_Store

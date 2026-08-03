@@ -42,7 +42,7 @@ SOURCE_TABLE ?= products_merged
 REDACTED_DB_PATH ?= data/products_public.db
 DOCS_DIR ?= docs
 GH_PAGES_HOST ?= dennislwm.github.io/pyholofoil
-OVERRIDES_TABLES := $(shell awk '/^x-overrides-tables:/{f=1;next} f&&/^- /{print "products_merged_" substr($$0,3)} f&&!/^- /{f=0}' datasette.yaml)
+OVERRIDES_TABLES := $(shell awk '/^x-overrides-tables:/{f=1;next} f&&/^- /{print "products_merged_" substr($$0,3)} f&&!/^- /{f=0}' datasette.local.yaml)
 INPUT_FILES := $(shell ls input/ 2>/dev/null)
 DATA_DBS := $(shell ls data/*.db 2>/dev/null | grep -v '^$(DB_PATH)$$')
 

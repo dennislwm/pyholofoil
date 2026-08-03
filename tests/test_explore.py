@@ -1,5 +1,6 @@
 import json
 import re
+import shutil
 import sqlite3
 from pathlib import Path
 
@@ -65,14 +66,21 @@ def test_copy_to_overrides_column_list_matches_products_overrides_schema(tmp_pat
     }
     input_path = tmp_path / "shiny.json"
     input_path.write_text(json.dumps([record]))
+    # Per ADR-29: copy-to-overrides (the primary, unsuffixed query) is
+    # hand-authored in datasette.local.yaml, never generated -- the
+    # tracked .example template is this project's one canonical source
+    # for it now that datasette.local.yaml itself is gitignored.
+    shutil.copyfile(
+        Path(__file__).parent.parent / "datasette.local.yaml.example",
+        tmp_path / "datasette.local.yaml",
+    )
     load_products(str(input_path), str(db_path))
 
     conn = sqlite3.connect(str(db_path))
     actual_columns = {row[1] for row in conn.execute("PRAGMA table_info(products_overrides)")}
     conn.close()
 
-    repo_datasette_yaml = Path(__file__).parent.parent / "datasette.yaml"
-    with open(repo_datasette_yaml) as f:
+    with open(tmp_path / "datasette.yaml") as f:
         config = YAML().load(f)
     sql = config["databases"]["products"]["queries"]["copy-to-overrides"]["sql"]
 
@@ -132,8 +140,7 @@ def test_copy_to_overrides_sold_column_list_matches_products_overrides_sold_sche
     }
     conn.close()
 
-    repo_datasette_yaml = Path(__file__).parent.parent / "datasette.yaml"
-    with open(repo_datasette_yaml) as f:
+    with open(tmp_path / "datasette.yaml") as f:
         config = YAML().load(f)
     sql = config["databases"]["products"]["queries"]["copy-to-overrides-sold"]["sql"]
 
